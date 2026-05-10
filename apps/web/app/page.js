@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { api } from "../lib/api";
+import { api, getStoredSessionToken } from "../lib/api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
 const THEME_STORAGE_KEY = "spaceflux-theme";
@@ -163,8 +163,11 @@ export default function Page() {
         setShowLaunchOverlay(Boolean(me.user));
         setHasPrimedWorkspace(false);
         setUser(me.user);
-      } catch {
+      } catch (error) {
         if (!cancelled) {
+          if (error?.status === 401) {
+            api.clearStoredSession();
+          }
           setShowLaunchOverlay(false);
           setHasPrimedWorkspace(false);
           setUser(null);
@@ -313,7 +316,11 @@ export default function Page() {
       return;
     }
 
-    const socket = new WebSocket(WS_URL);
+    const sessionToken = getStoredSessionToken();
+    const socketUrl = sessionToken
+      ? `${WS_URL}${WS_URL.includes("?") ? "&" : "?"}token=${encodeURIComponent(sessionToken)}`
+      : WS_URL;
+    const socket = new WebSocket(socketUrl);
     socketRef.current = socket;
     setSocketStatus("connecting");
 
@@ -438,6 +445,7 @@ export default function Page() {
   async function handleLogout() {
     try {
       await api.logout();
+      api.clearStoredSession();
       setShowLaunchOverlay(false);
       setHasPrimedWorkspace(false);
       setUser(null);

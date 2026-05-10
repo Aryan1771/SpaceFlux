@@ -6,6 +6,7 @@ import cookie from "cookie";
 import express from "express";
 import http from "node:http";
 import { nanoid } from "nanoid";
+import { URL } from "node:url";
 import { WebSocketServer } from "ws";
 
 import { db, queryMany, queryOne } from "./db.js";
@@ -61,6 +62,41 @@ function asPlainRows(rows) {
   return rows.map((row) => asPlainRow(row));
 }
 
+function readBearerToken(value) {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+
+  const [scheme, token] = value.split(" ");
+  if (scheme?.toLowerCase() !== "bearer" || !token) {
+    return "";
+  }
+
+  return token.trim();
+}
+
+function getRequestSessionToken(req) {
+  return req.cookies[cookieName] || readBearerToken(req.headers.authorization) || "";
+}
+
+function getSocketSessionToken(request) {
+  const parsedCookies = cookie.parse(request.headers.cookie || "");
+  if (parsedCookies[cookieName]) {
+    return parsedCookies[cookieName];
+  }
+
+  const authorizationHeader = request.headers.authorization;
+  if (typeof authorizationHeader === "string") {
+    const bearerToken = readBearerToken(authorizationHeader);
+    if (bearerToken) {
+      return bearerToken;
+    }
+  }
+
+  const requestUrl = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+  return requestUrl.searchParams.get("token") || "";
+}
+
 async function createSessionForUser(userId) {
   const token = generateSessionToken();
   const sessionId = nanoid();
@@ -108,7 +144,7 @@ async function getUserFromSessionToken(token) {
 }
 
 const requireUser = asyncHandler(async (req, res, next) => {
-  const token = req.cookies[cookieName];
+  const token = getRequestSessionToken(req);
   const user = await getUserFromSessionToken(token);
 
   if (!user) {
@@ -288,7 +324,7 @@ async function bootstrapRoomState(roomId) {
 }
 
 async function closeUserSession(req, res) {
-  const token = req.cookies[cookieName];
+  const token = getRequestSessionToken(req);
   if (token) {
     await db.execute({
       sql: "DELETE FROM sessions WHERE token_hash = ?",
@@ -345,7 +381,8 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
       id: userId,
       email,
       displayName
-    }
+    },
+    sessionToken: session.token
   });
 }));
 
@@ -377,7 +414,8 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
       id: user.id,
       email: user.email,
       displayName: user.display_name
-    }
+    },
+    sessionToken: session.token
   });
 }));
 
@@ -527,8 +565,7 @@ app.use((error, _req, res, _next) => {
 });
 
 wsServer.on("connection", async (socket, request) => {
-  const parsedCookies = cookie.parse(request.headers.cookie || "");
-  const token = parsedCookies[cookieName];
+  const token = getSocketSessionToken(request);
   const user = await getUserFromSessionToken(token);
 
   if (!user) {

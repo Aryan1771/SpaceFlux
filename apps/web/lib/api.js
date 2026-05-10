@@ -1,10 +1,34 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+const SESSION_TOKEN_KEY = "spaceflux-session-token";
+
+function readSessionToken() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(SESSION_TOKEN_KEY) || "";
+}
+
+function writeSessionToken(token) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(SESSION_TOKEN_KEY, token);
+    return;
+  }
+
+  window.localStorage.removeItem(SESSION_TOKEN_KEY);
+}
 
 async function request(path, options = {}) {
+  const sessionToken = readSessionToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
       ...(options.headers || {})
     },
     ...options
@@ -18,10 +42,19 @@ async function request(path, options = {}) {
       payload = null;
     }
 
-    throw new Error(payload?.error || `Request failed: ${response.status}`);
+    const error = new Error(payload?.error || `Request failed: ${response.status}`);
+    error.status = response.status;
+    error.detail = payload?.detail || "";
+    throw error;
   }
 
-  return response.json();
+  const payload = await response.json();
+
+  if (payload?.sessionToken) {
+    writeSessionToken(payload.sessionToken);
+  }
+
+  return payload;
 }
 
 export const api = {
@@ -34,5 +67,10 @@ export const api = {
   joinRoom: (body) => request("/rooms/join", { method: "POST", body: JSON.stringify(body) }),
   leaveRoom: (roomId) => request(`/rooms/${roomId}/leave`, { method: "POST" }),
   getMessages: (roomId) => request(`/rooms/${roomId}/messages`),
-  getFiles: (roomId) => request(`/rooms/${roomId}/files`)
+  getFiles: (roomId) => request(`/rooms/${roomId}/files`),
+  clearStoredSession: () => writeSessionToken("")
 };
+
+export function getStoredSessionToken() {
+  return readSessionToken();
+}
