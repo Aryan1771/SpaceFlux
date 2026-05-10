@@ -421,6 +421,7 @@ main {
 .primary-button,
 .secondary-button,
 .ghost-button,
+.danger-button,
 .theme-chip,
 .room-tile {
   border: none;
@@ -430,7 +431,8 @@ main {
 
 .primary-button,
 .secondary-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   padding: 0.9rem 1rem;
 }
 
@@ -452,9 +454,16 @@ main {
   border: 1px solid var(--border);
 }
 
+.danger-button {
+  background: rgba(255, 107, 107, 0.14);
+  color: #ff9d9d;
+  border: 1px solid rgba(255, 107, 107, 0.2);
+}
+
 .primary-button:hover,
 .secondary-button:hover,
 .ghost-button:hover,
+.danger-button:hover,
 .theme-chip:hover,
 .room-tile:hover {
   transform: translateY(-1px);
@@ -666,6 +675,17 @@ main {
   margin: 0.3rem 0 0;
 }
 
+.message-edit-stack {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+}
+
+.message-edit-stack textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
 .message-meta {
   display: flex;
   justify-content: space-between;
@@ -684,6 +704,19 @@ main {
 
 .file-toolbar {
   grid-template-columns: 1fr auto;
+}
+
+.message-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+.edited-label {
+  display: inline-block;
+  margin-top: 0.45rem;
+  color: var(--muted);
 }
 
 .file-picker {
@@ -714,6 +747,19 @@ main {
   padding: 0.9rem 1rem;
 }
 
+.transfer-copy {
+  min-width: 0;
+}
+
+.transfer-progress-copy {
+  margin-top: 0.55rem;
+  display: flex;
+  gap: 0.9rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  flex-wrap: wrap;
+}
+
 .transfer-actions {
   display: grid;
   gap: 0.4rem;
@@ -723,6 +769,29 @@ main {
 .status-text {
   color: var(--muted);
   font-size: 0.88rem;
+}
+
+.progress-ring {
+  --progress: 0%;
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at center, var(--bg-elevated) 58%, transparent 59%),
+    conic-gradient(var(--primary) var(--progress), rgba(127, 140, 163, 0.18) 0);
+  border: 1px solid rgba(127, 140, 163, 0.16);
+}
+
+.progress-ring span {
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.danger-ghost {
+  color: #ff9d9d;
 }
 
 .member-row {

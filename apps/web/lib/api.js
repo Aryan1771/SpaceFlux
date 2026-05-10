@@ -66,8 +66,16 @@ export const api = {
   createRoom: (body) => request("/rooms", { method: "POST", body: JSON.stringify(body) }),
   joinRoom: (body) => request("/rooms/join", { method: "POST", body: JSON.stringify(body) }),
   leaveRoom: (roomId) => request(`/rooms/${roomId}/leave`, { method: "POST" }),
+  deleteRoom: (roomId) => request(`/rooms/${roomId}`, { method: "DELETE" }),
   getMessages: (roomId) => request(`/rooms/${roomId}/messages`),
   getFiles: (roomId) => request(`/rooms/${roomId}/files`),
+  updateMessage: (roomId, messageId, body) => request(`/rooms/${roomId}/messages/${messageId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  deleteMessage: (roomId, messageId) => request(`/rooms/${roomId}/messages/${messageId}`, {
+    method: "DELETE"
+  }),
   clearStoredSession: () => writeSessionToken("")
 };
 

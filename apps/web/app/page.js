@@ -9,11 +9,17 @@ const THEME_STORAGE_KEY = "spaceflux-theme";
 const POINTER_BREAKPOINT = 820;
 const PHONE_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const DESKTOP_FILE_LIMIT_BYTES = 100 * 1024 * 1024;
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+const TRANSFER_TIMEOUT_MS = 20000;
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" }
+];
 
 const STATUS_COPY = {
   offered: "Waiting for recipient",
   accepted: "Connecting peers",
+  transferring: "Transferring",
   complete: "Completed",
   rejected: "Rejected",
   failed: "Failed"
@@ -79,6 +85,22 @@ function mergeTransfer(list, nextTransfer) {
   return updated;
 }
 
+function mergeTransferRuntime(map, transferId, patch) {
+  return {
+    ...map,
+    [transferId]: {
+      ...(map[transferId] || {}),
+      ...patch
+    }
+  };
+}
+
+function removeTransferRuntime(map, transferId) {
+  const next = { ...map };
+  delete next[transferId];
+  return next;
+}
+
 export default function Page() {
   const [theme, setTheme] = useState("system");
   const [user, setUser] = useState(null);
@@ -88,6 +110,7 @@ export default function Page() {
   const [activeRoomId, setActiveRoomId] = useState("");
   const [messages, setMessages] = useState([]);
   const [fileTransfers, setFileTransfers] = useState([]);
+  const [transferRuntime, setTransferRuntime] = useState({});
   const [members, setMembers] = useState([]);
   const [pointers, setPointers] = useState([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -101,6 +124,8 @@ export default function Page() {
   const [isCompactLayout, setIsCompactLayout] = useState(false);
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [editingMessageId, setEditingMessageId] = useState("");
+  const [editingMessageDraft, setEditingMessageDraft] = useState("");
   const [showLaunchOverlay, setShowLaunchOverlay] = useState(false);
   const [hasPrimedWorkspace, setHasPrimedWorkspace] = useState(false);
 
@@ -110,6 +135,7 @@ export default function Page() {
   const peerConnectionsRef = useRef(new Map());
   const pendingOutgoingFilesRef = useRef(new Map());
   const incomingTransfersRef = useRef(new Map());
+  const transferTimeoutsRef = useRef(new Map());
   const reconnectTimeoutRef = useRef(null);
 
   const activeRoom = useMemo(
@@ -192,6 +218,7 @@ export default function Page() {
       setActiveRoomId("");
       setMessages([]);
       setFileTransfers([]);
+      setTransferRuntime({});
       setMembers([]);
       setPointers([]);
       setShowLaunchOverlay(false);
@@ -247,6 +274,10 @@ export default function Page() {
 
   useEffect(() => {
     return () => {
+      for (const timeoutId of transferTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      transferTimeoutsRef.current.clear();
       for (const connection of peerConnectionsRef.current.values()) {
         connection.close();
       }
@@ -304,6 +335,53 @@ export default function Page() {
       setHasPrimedWorkspace(true);
       setShowLaunchOverlay(false);
     }
+  }
+
+  function clearTransferTimeout(transferId) {
+    const timeoutId = transferTimeoutsRef.current.get(transferId);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      transferTimeoutsRef.current.delete(transferId);
+    }
+  }
+
+  function scheduleTransferTimeout(transferId, label) {
+    clearTransferTimeout(transferId);
+    const timeoutId = window.setTimeout(() => {
+      failTransfer(transferId, `${label} timed out. Try again.`);
+    }, TRANSFER_TIMEOUT_MS);
+    transferTimeoutsRef.current.set(transferId, timeoutId);
+  }
+
+  function closeTransferPeer(transferId) {
+    clearTransferTimeout(transferId);
+    const connection = peerConnectionsRef.current.get(transferId);
+    if (connection) {
+      connection.close();
+      peerConnectionsRef.current.delete(transferId);
+    }
+  }
+
+  function updateTransferRuntime(transferId, patch) {
+    setTransferRuntime((current) => mergeTransferRuntime(current, transferId, patch));
+  }
+
+  function failTransfer(transferId, message, shouldNotify = true) {
+    incomingTransfersRef.current.delete(transferId);
+    pendingOutgoingFilesRef.current.delete(transferId);
+    closeTransferPeer(transferId);
+    updateTransferRuntime(transferId, { phase: "failed", message });
+    if (shouldNotify) {
+      sendSocket({
+        type: "file:failed",
+        payload: { transferId }
+      });
+    }
+    setGlobalError(message);
+  }
+
+  function clearTransferRuntime(transferId) {
+    setTransferRuntime((current) => removeTransferRuntime(current, transferId));
   }
 
   function connectSocket() {
@@ -374,6 +452,16 @@ export default function Page() {
         return;
       }
 
+      if (message.type === "chat:updated") {
+        setMessages((current) => current.map((item) => item.id === message.payload.id ? message.payload : item));
+        return;
+      }
+
+      if (message.type === "chat:deleted") {
+        setMessages((current) => current.filter((item) => item.id !== message.payload.id));
+        return;
+      }
+
       if (message.type === "pointer:update") {
         setPointers((current) => {
           const filtered = current.filter((pointer) => pointer.userId !== message.payload.userId);
@@ -384,25 +472,65 @@ export default function Page() {
 
       if (message.type === "file:offered") {
         setFileTransfers((current) => mergeTransfer(current, message.payload));
+        updateTransferRuntime(message.payload.id, {
+          totalBytes: Number(message.payload.sizeBytes || 0),
+          transferredBytes: 0,
+          phase: "offered"
+        });
         setInfoMessage(`${message.payload.senderName} offered ${message.payload.filename}`);
         return;
       }
 
       if (message.type === "file:status") {
         setFileTransfers((current) => mergeTransfer(current, message.payload));
+        const totalBytes = Number(message.payload.sizeBytes || 0);
 
         if (message.payload.clientOfferId && pendingOutgoingFilesRef.current.has(message.payload.clientOfferId)) {
           const pendingFile = pendingOutgoingFilesRef.current.get(message.payload.clientOfferId);
           pendingOutgoingFilesRef.current.delete(message.payload.clientOfferId);
           pendingOutgoingFilesRef.current.set(message.payload.id, pendingFile);
+          clearTransferRuntime(message.payload.clientOfferId);
+          updateTransferRuntime(message.payload.id, {
+            totalBytes: pendingFile.file.size,
+            transferredBytes: 0,
+            phase: message.payload.status === "accepted" ? "connecting" : message.payload.status
+          });
         }
 
         if (message.payload.status === "accepted" && message.payload.senderId === user?.id) {
+          updateTransferRuntime(message.payload.id, {
+            totalBytes,
+            transferredBytes: 0,
+            phase: "connecting"
+          });
           await beginSendingTransfer(message.payload.id, message.payload.recipientId);
         }
 
+        if (message.payload.status === "accepted" && message.payload.recipientId === user?.id) {
+          updateTransferRuntime(message.payload.id, {
+            totalBytes,
+            transferredBytes: 0,
+            phase: "connecting"
+          });
+        }
+
         if (message.payload.status === "complete") {
+          updateTransferRuntime(message.payload.id, {
+            totalBytes,
+            transferredBytes: totalBytes,
+            phase: "complete"
+          });
+          closeTransferPeer(message.payload.id);
           setInfoMessage(`Transfer complete: ${message.payload.filename || message.payload.id}`);
+        }
+
+        if (message.payload.status === "failed" || message.payload.status === "rejected") {
+          updateTransferRuntime(message.payload.id, {
+            totalBytes,
+            phase: message.payload.status,
+            message: message.payload.status === "failed" ? "Peer connection failed." : ""
+          });
+          closeTransferPeer(message.payload.id);
         }
         return;
       }
@@ -414,6 +542,14 @@ export default function Page() {
 
       if (message.type === "error") {
         setGlobalError(message.payload?.message || "Realtime error");
+        return;
+      }
+
+      if (message.type === "room:deleted") {
+        if (message.payload?.roomId === activeRoomIdRef.current) {
+          setInfoMessage(`${message.payload.roomName || "Room"} was deleted.`);
+        }
+        await loadRooms(true);
       }
     });
   }
@@ -541,6 +677,71 @@ export default function Page() {
     setChatDraft("");
   }
 
+  function startEditingMessage(message) {
+    setEditingMessageId(message.id);
+    setEditingMessageDraft(message.content);
+  }
+
+  function cancelEditingMessage() {
+    setEditingMessageId("");
+    setEditingMessageDraft("");
+  }
+
+  async function saveEditedMessage(messageId) {
+    if (!activeRoomId || !editingMessageDraft.trim()) {
+      return;
+    }
+
+    try {
+      const response = await api.updateMessage(activeRoomId, messageId, {
+        content: editingMessageDraft
+      });
+      setMessages((current) => current.map((message) => (
+        message.id === messageId ? response.message : message
+      )));
+      cancelEditingMessage();
+      setInfoMessage("Message updated");
+    } catch (error) {
+      setGlobalError(error.message);
+    }
+  }
+
+  async function handleDeleteMessage(messageId) {
+    if (!activeRoomId) {
+      return;
+    }
+
+    try {
+      await api.deleteMessage(activeRoomId, messageId);
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+      if (editingMessageId === messageId) {
+        cancelEditingMessage();
+      }
+      setInfoMessage("Message deleted");
+    } catch (error) {
+      setGlobalError(error.message);
+    }
+  }
+
+  async function handleDeleteRoom() {
+    if (!activeRoom?.id) {
+      return;
+    }
+
+    try {
+      await api.deleteRoom(activeRoom.id);
+      await loadRooms(true);
+      setMessages([]);
+      setMembers([]);
+      setPointers([]);
+      setFileTransfers([]);
+      setTransferRuntime({});
+      setInfoMessage(`${activeRoom.name} deleted`);
+    } catch (error) {
+      setGlobalError(error.message);
+    }
+  }
+
   async function handleFileSelection(event) {
     const file = event.target.files?.[0];
     if (!file || !activeRoomId || !selectedRecipientId) {
@@ -558,6 +759,11 @@ export default function Page() {
     pendingOutgoingFilesRef.current.set(clientOfferId, {
       file,
       recipientUserId: selectedRecipientId
+    });
+    updateTransferRuntime(clientOfferId, {
+      totalBytes: file.size,
+      transferredBytes: 0,
+      phase: "offered"
     });
 
     sendSocket({
@@ -585,9 +791,21 @@ export default function Page() {
     const peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const channel = peerConnection.createDataChannel("file-transfer");
     peerConnectionsRef.current.set(transferId, peerConnection);
+    scheduleTransferTimeout(transferId, "Peer connection");
+    updateTransferRuntime(transferId, {
+      totalBytes: pendingEntry.file.size,
+      transferredBytes: 0,
+      phase: "connecting"
+    });
 
     channel.binaryType = "arraybuffer";
     channel.onopen = async () => {
+      clearTransferTimeout(transferId);
+      updateTransferRuntime(transferId, {
+        totalBytes: pendingEntry.file.size,
+        transferredBytes: 0,
+        phase: "transferring"
+      });
       await sendFileOverChannel({
         channel,
         file: pendingEntry.file,
@@ -595,7 +813,25 @@ export default function Page() {
       });
     };
     channel.onerror = () => {
-      setGlobalError(`File transfer failed for ${pendingEntry.file.name}`);
+      failTransfer(transferId, `File transfer failed for ${pendingEntry.file.name}`);
+    };
+    channel.onclose = () => {
+      if (pendingOutgoingFilesRef.current.has(transferId) || incomingTransfersRef.current.has(transferId)) {
+        failTransfer(transferId, `Connection closed before ${pendingEntry.file.name} finished sending.`);
+      }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      if (peerConnection.connectionState === "connected") {
+        clearTransferTimeout(transferId);
+      }
+
+      if (
+        ["failed", "disconnected", "closed"].includes(peerConnection.connectionState)
+        && (pendingOutgoingFilesRef.current.has(transferId) || incomingTransfersRef.current.has(transferId))
+      ) {
+        failTransfer(transferId, `Peer connection failed for ${pendingEntry.file.name}.`);
+      }
     };
 
     peerConnection.onicecandidate = (iceEvent) => {
@@ -652,6 +888,30 @@ export default function Page() {
         metadata: transfer
       };
       incomingTransfersRef.current.set(transferId, transferState);
+      scheduleTransferTimeout(transferId, "Peer connection");
+      updateTransferRuntime(transferId, {
+        totalBytes: Number(transfer.sizeBytes || 0),
+        transferredBytes: 0,
+        phase: "connecting"
+      });
+
+      peerConnection.onconnectionstatechange = () => {
+        if (peerConnection.connectionState === "connected") {
+          clearTransferTimeout(transferId);
+          updateTransferRuntime(transferId, {
+            totalBytes: Number(transferState.metadata.sizeBytes || 0),
+            transferredBytes: transferState.receivedBytes,
+            phase: "transferring"
+          });
+        }
+
+        if (
+          ["failed", "disconnected", "closed"].includes(peerConnection.connectionState)
+          && (pendingOutgoingFilesRef.current.has(transferId) || incomingTransfersRef.current.has(transferId))
+        ) {
+          failTransfer(transferId, `Peer connection failed for ${transfer.filename}.`);
+        }
+      };
 
       peerConnection.onicecandidate = (iceEvent) => {
         if (!iceEvent.candidate) {
@@ -684,6 +944,11 @@ export default function Page() {
                 ...transferState.metadata,
                 ...parsed.payload
               };
+              updateTransferRuntime(transferId, {
+                totalBytes: Number(parsed.payload.sizeBytes || transferState.metadata.sizeBytes || 0),
+                transferredBytes: transferState.receivedBytes,
+                phase: "transferring"
+              });
             }
             if (parsed.type === "complete") {
               await finalizeIncomingTransfer(transferId);
@@ -693,6 +958,14 @@ export default function Page() {
 
           transferState.chunks.push(channelEvent.data);
           transferState.receivedBytes += channelEvent.data.byteLength;
+          updateTransferRuntime(transferId, {
+            totalBytes: Number(transferState.metadata.sizeBytes || 0),
+            transferredBytes: transferState.receivedBytes,
+            phase: "transferring"
+          });
+        };
+        channel.onerror = () => {
+          failTransfer(transferId, `File transfer failed for ${transfer.filename}.`);
         };
       };
 
@@ -751,10 +1024,21 @@ export default function Page() {
       const chunk = await file.slice(offset, offset + chunkSize).arrayBuffer();
       channel.send(chunk);
       offset += chunk.byteLength;
+      updateTransferRuntime(transferId, {
+        totalBytes: file.size,
+        transferredBytes: offset,
+        phase: "transferring"
+      });
     }
 
     channel.send(JSON.stringify({ type: "complete" }));
     pendingOutgoingFilesRef.current.delete(transferId);
+    updateTransferRuntime(transferId, {
+      totalBytes: file.size,
+      transferredBytes: file.size,
+      phase: "complete"
+    });
+    closeTransferPeer(transferId);
   }
 
   async function finalizeIncomingTransfer(transferId) {
@@ -778,10 +1062,21 @@ export default function Page() {
       type: "file:complete",
       payload: { transferId }
     });
+    updateTransferRuntime(transferId, {
+      totalBytes: Number(transferState.metadata.sizeBytes || transferState.receivedBytes || 0),
+      transferredBytes: Number(transferState.metadata.sizeBytes || transferState.receivedBytes || 0),
+      phase: "complete"
+    });
+    closeTransferPeer(transferId);
     setInfoMessage(`Downloaded ${transferState.metadata.filename}`);
   }
 
   function acceptTransfer(transferId) {
+    updateTransferRuntime(transferId, {
+      totalBytes: Number(fileTransfers.find((transfer) => transfer.id === transferId)?.sizeBytes || 0),
+      transferredBytes: 0,
+      phase: "connecting"
+    });
     sendSocket({
       type: "file:accept",
       payload: { transferId }
@@ -939,6 +1234,11 @@ export default function Page() {
               </div>
 
               <div className="header-actions">
+                {activeRoom.ownerId === user.id ? (
+                  <button className="danger-button" type="button" onClick={handleDeleteRoom}>
+                    Delete room
+                  </button>
+                ) : null}
                 <button className="ghost-button" type="button" onClick={handleLeaveRoom}>
                   Leave room
                 </button>
@@ -965,7 +1265,40 @@ export default function Page() {
                           <strong>{message.displayName}</strong>
                           <span>{formatTime(message.createdAt)}</span>
                         </div>
-                        <p>{message.content}</p>
+                        {editingMessageId === message.id ? (
+                          <div className="message-edit-stack">
+                            <textarea
+                              value={editingMessageDraft}
+                              onChange={(event) => setEditingMessageDraft(event.target.value)}
+                              rows={3}
+                            />
+                            <div className="message-actions">
+                              <button className="primary-button" type="button" onClick={() => saveEditedMessage(message.id)}>
+                                Save
+                              </button>
+                              <button className="secondary-button" type="button" onClick={cancelEditingMessage}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p>{message.content}</p>
+                            {message.updatedAt && message.updatedAt !== message.createdAt ? (
+                              <small className="edited-label">edited</small>
+                            ) : null}
+                          </>
+                        )}
+                        {message.userId === user.id && editingMessageId !== message.id ? (
+                          <div className="message-actions">
+                            <button className="secondary-button" type="button" onClick={() => startEditingMessage(message)}>
+                              Edit
+                            </button>
+                            <button className="ghost-button danger-ghost" type="button" onClick={() => handleDeleteMessage(message.id)}>
+                              Delete
+                            </button>
+                          </div>
+                        ) : null}
                       </article>
                     ))}
                   </div>
@@ -1012,16 +1345,37 @@ export default function Page() {
                   <div className="transfer-list">
                     {fileTransfers.map((transfer) => {
                       const canAccept = transfer.recipientId === user.id && transfer.status === "offered";
+                      const runtime = transferRuntime[transfer.id] || transferRuntime[transfer.clientOfferId];
+                      const totalBytes = Number(runtime?.totalBytes || transfer.sizeBytes || 0);
+                      const transferredBytes = Number(runtime?.transferredBytes || 0);
+                      const percent = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : 0;
+                      const runtimeStatus = runtime?.phase ? (STATUS_COPY[runtime.phase] || runtime.phase) : "";
+                      const statusLabel = runtimeStatus || STATUS_COPY[transfer.status] || transfer.status;
                       return (
                         <article className="transfer-card" key={transfer.id}>
-                          <div>
+                          <div className="transfer-copy">
                             <strong>{transfer.filename}</strong>
                             <p>
                               {transfer.senderName} to {transfer.recipientName || "Room"} - {formatBytes(transfer.sizeBytes)}
                             </p>
+                            {runtime ? (
+                              <div className="transfer-progress-copy">
+                                <span>{formatBytes(transferredBytes)} / {formatBytes(totalBytes)}</span>
+                                <span>{percent}%</span>
+                              </div>
+                            ) : null}
                           </div>
                           <div className="transfer-actions">
-                            <span className="status-text">{STATUS_COPY[transfer.status] || transfer.status}</span>
+                            {runtime ? (
+                              <div
+                                className="progress-ring"
+                                style={{ "--progress": `${percent}%` }}
+                                aria-label={`${percent}% transferred`}
+                              >
+                                <span>{percent}%</span>
+                              </div>
+                            ) : null}
+                            <span className="status-text">{statusLabel}</span>
                             {canAccept ? (
                               <button className="secondary-button" type="button" onClick={() => acceptTransfer(transfer.id)}>
                                 Accept

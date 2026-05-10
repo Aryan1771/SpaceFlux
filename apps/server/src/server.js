@@ -97,6 +97,14 @@ function getSocketSessionToken(request) {
   return requestUrl.searchParams.get("token") || "";
 }
 
+async function ensureDatabaseCompatibility() {
+  const messageColumns = asPlainRows(await queryMany("PRAGMA table_info(messages)"));
+  if (!messageColumns.some((column) => column.name === "updated_at")) {
+    await db.execute("ALTER TABLE messages ADD COLUMN updated_at TEXT");
+    await db.execute("UPDATE messages SET updated_at = created_at WHERE updated_at IS NULL");
+  }
+}
+
 async function createSessionForUser(userId) {
   const token = generateSessionToken();
   const sessionId = nanoid();
@@ -164,6 +172,25 @@ async function userHasRoomAccess(userId, roomId) {
   return Boolean(row);
 }
 
+async function getRoomById(roomId) {
+  return asPlainRow(await queryOne(
+    "SELECT id, name, owner_id, join_code_display, created_at FROM rooms WHERE id = ?",
+    [roomId]
+  ));
+}
+
+async function requireRoomOwner(userId, roomId) {
+  const room = await getRoomById(roomId);
+  if (!room) {
+    return { room: null, allowed: false };
+  }
+
+  return {
+    room,
+    allowed: room.owner_id === userId
+  };
+}
+
 function shapeRoom(row) {
   return {
     id: row.id,
@@ -181,7 +208,8 @@ function shapeMessage(row) {
     userId: row.user_id,
     displayName: row.display_name,
     content: row.content,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -511,6 +539,37 @@ app.post("/rooms/:roomId/leave", requireUser, asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+app.delete("/rooms/:roomId", requireUser, asyncHandler(async (req, res) => {
+  const { roomId } = req.params;
+  const { room, allowed } = await requireRoomOwner(req.user.id, roomId);
+
+  if (!room) {
+    res.status(404).json({ error: "Room not found" });
+    return;
+  }
+
+  if (!allowed) {
+    res.status(403).json({ error: "Only the room owner can delete this room" });
+    return;
+  }
+
+  broadcast(roomId, {
+    type: "room:deleted",
+    payload: {
+      roomId,
+      roomName: room.name
+    }
+  });
+
+  await db.execute({
+    sql: "DELETE FROM rooms WHERE id = ?",
+    args: [roomId]
+  });
+
+  roomConnections.delete(roomId);
+  res.json({ ok: true, roomId });
+}));
+
 app.get("/rooms/:roomId/messages", requireUser, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
@@ -520,7 +579,7 @@ app.get("/rooms/:roomId/messages", requireUser, asyncHandler(async (req, res) =>
   }
 
   const rows = asPlainRows(await queryMany(
-    `SELECT messages.id, messages.room_id, messages.user_id, messages.content, messages.created_at, users.display_name
+    `SELECT messages.id, messages.room_id, messages.user_id, messages.content, messages.created_at, messages.updated_at, users.display_name
      FROM messages
      JOIN users ON users.id = messages.user_id
      WHERE messages.room_id = ?
@@ -530,6 +589,95 @@ app.get("/rooms/:roomId/messages", requireUser, asyncHandler(async (req, res) =>
   ));
 
   res.json({ messages: rows.reverse().map(shapeMessage) });
+}));
+
+app.patch("/rooms/:roomId/messages/:messageId", requireUser, asyncHandler(async (req, res) => {
+  const { roomId, messageId } = req.params;
+  const content = sanitizeMessage(req.body?.content);
+
+  if (!content) {
+    res.status(400).json({ error: "Message content is required" });
+    return;
+  }
+
+  if (!(await userHasRoomAccess(req.user.id, roomId))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const existing = asPlainRow(await queryOne(
+    "SELECT id, room_id, user_id FROM messages WHERE id = ? AND room_id = ?",
+    [messageId, roomId]
+  ));
+
+  if (!existing) {
+    res.status(404).json({ error: "Message not found" });
+    return;
+  }
+
+  if (existing.user_id !== req.user.id) {
+    res.status(403).json({ error: "You can only edit your own messages" });
+    return;
+  }
+
+  await db.execute({
+    sql: "UPDATE messages SET content = ?, updated_at = ? WHERE id = ?",
+    args: [content, new Date().toISOString(), messageId]
+  });
+
+  const updated = shapeMessage(asPlainRow(await queryOne(
+    `SELECT messages.id, messages.room_id, messages.user_id, messages.content, messages.created_at, messages.updated_at, users.display_name
+     FROM messages
+     JOIN users ON users.id = messages.user_id
+     WHERE messages.id = ?`,
+    [messageId]
+  )));
+
+  broadcast(roomId, {
+    type: "chat:updated",
+    payload: updated
+  });
+
+  res.json({ message: updated });
+}));
+
+app.delete("/rooms/:roomId/messages/:messageId", requireUser, asyncHandler(async (req, res) => {
+  const { roomId, messageId } = req.params;
+
+  if (!(await userHasRoomAccess(req.user.id, roomId))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const existing = asPlainRow(await queryOne(
+    "SELECT id, room_id, user_id FROM messages WHERE id = ? AND room_id = ?",
+    [messageId, roomId]
+  ));
+
+  if (!existing) {
+    res.status(404).json({ error: "Message not found" });
+    return;
+  }
+
+  if (existing.user_id !== req.user.id) {
+    res.status(403).json({ error: "You can only delete your own messages" });
+    return;
+  }
+
+  await db.execute({
+    sql: "DELETE FROM messages WHERE id = ?",
+    args: [messageId]
+  });
+
+  broadcast(roomId, {
+    type: "chat:deleted",
+    payload: {
+      id: messageId,
+      roomId
+    }
+  });
+
+  res.json({ ok: true, messageId });
 }));
 
 app.get("/rooms/:roomId/files", requireUser, asyncHandler(async (req, res) => {
@@ -635,13 +783,14 @@ wsServer.on("connection", async (socket, request) => {
         }
 
         const messageId = nanoid();
+        const messageTimestamp = new Date().toISOString();
         await db.execute({
-          sql: "INSERT INTO messages (id, room_id, user_id, content) VALUES (?, ?, ?, ?)",
-          args: [messageId, roomId, user.id, content]
+          sql: "INSERT INTO messages (id, room_id, user_id, content, updated_at) VALUES (?, ?, ?, ?, ?)",
+          args: [messageId, roomId, user.id, content, messageTimestamp]
         });
 
         const saved = shapeMessage(asPlainRow(await queryOne(
-          `SELECT messages.id, messages.room_id, messages.user_id, messages.content, messages.created_at, users.display_name
+          `SELECT messages.id, messages.room_id, messages.user_id, messages.content, messages.created_at, messages.updated_at, users.display_name
            FROM messages
            JOIN users ON users.id = messages.user_id
            WHERE messages.id = ?`,
@@ -818,6 +967,41 @@ wsServer.on("connection", async (socket, request) => {
         return;
       }
 
+      if (message.type === "file:failed") {
+        const transferId = String(message.payload?.transferId || "");
+
+        const transfer = asPlainRow(await queryOne(
+          "SELECT id, room_id FROM file_transfers WHERE id = ?",
+          [transferId]
+        ));
+
+        if (!transfer) {
+          return;
+        }
+
+        await db.execute({
+          sql: "UPDATE file_transfers SET status = ?, updated_at = ? WHERE id = ?",
+          args: ["failed", new Date().toISOString(), transferId]
+        });
+
+        const updatedTransfer = shapeFileTransfer(asPlainRow(await queryOne(
+          `SELECT f.id, f.room_id, f.sender_id, sender.display_name AS sender_name,
+                  f.recipient_id, recipient.display_name AS recipient_name,
+                  f.filename, f.size_bytes, f.mime_type, f.status, f.created_at, f.updated_at
+           FROM file_transfers f
+           JOIN users sender ON sender.id = f.sender_id
+           LEFT JOIN users recipient ON recipient.id = f.recipient_id
+           WHERE f.id = ?`,
+          [transferId]
+        )));
+
+        broadcast(transfer.room_id, {
+          type: "file:status",
+          payload: updatedTransfer
+        });
+        return;
+      }
+
       if (message.type === "webrtc:signal") {
         const roomId = String(message.payload?.roomId || "");
         const targetUserId = String(message.payload?.targetUserId || "");
@@ -880,7 +1064,14 @@ wsServer.on("close", () => {
   clearInterval(heartbeatInterval);
 });
 
-server.listen(PORT, () => {
-  console.log(`SpaceFlux server listening on http://0.0.0.0:${PORT}`);
-  console.log(`Allowed frontend origin: ${FRONTEND_ORIGIN}`);
-});
+ensureDatabaseCompatibility()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`SpaceFlux server listening on http://0.0.0.0:${PORT}`);
+      console.log(`Allowed frontend origin: ${FRONTEND_ORIGIN}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to prepare database compatibility", error);
+    process.exit(1);
+  });
