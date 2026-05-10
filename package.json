@@ -1,16 +1,16 @@
 {
-  "name": "siteshare",
+  "name": "spaceflux",
   "private": true,
   "workspaces": [
     "apps/web",
     "apps/server"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace @siteshare/server\" \"npm run dev --workspace @siteshare/web\"",
-    "dev:web": "npm run dev --workspace @siteshare/web",
-    "dev:server": "npm run dev --workspace @siteshare/server",
-    "build": "npm run build --workspace @siteshare/server && npm run build --workspace @siteshare/web",
-    "lint": "npm run lint --workspace @siteshare/server && npm run lint --workspace @siteshare/web"
+    "dev": "concurrently \"npm run dev --workspace @spaceflux/server\" \"npm run dev --workspace @spaceflux/web\"",
+    "dev:web": "npm run dev --workspace @spaceflux/web",
+    "dev:server": "npm run dev --workspace @spaceflux/server",
+    "build": "npm run build --workspace @spaceflux/server && npm run build --workspace @spaceflux/web",
+    "lint": "npm run lint --workspace @spaceflux/server && npm run lint --workspace @spaceflux/web"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

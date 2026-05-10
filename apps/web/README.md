@@ -1,4 +1,4 @@
-# SiteShare Web
+# SpaceFlux Web
 
 Next.js frontend deployed on Vercel.
 

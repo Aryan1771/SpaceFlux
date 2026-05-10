@@ -1,6 +1,6 @@
-# SiteShare
+# SpaceFlux
 
-SiteShare is a responsive room-based collaboration app built for free-tier hosting. Users can create accounts, join multiple rooms by code, chat, share files directly over WebRTC, and see live mouse pointers on larger screens.
+SpaceFlux is a responsive room-based collaboration app built for free-tier hosting. Users can create accounts, join multiple rooms by code, chat, share files directly over WebRTC, and see live mouse pointers on larger screens.
 
 ## Stack
 
@@ -24,7 +24,7 @@ SiteShare is a responsive room-based collaboration app built for free-tier hosti
 ## Monorepo layout
 
 ```text
-SiteShare/
+SpaceFlux/
 ├─ apps/
 │  ├─ server/   # Render backend
 │  └─ web/      # Vercel frontend

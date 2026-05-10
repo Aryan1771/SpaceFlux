@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: siteshare-server
+    name: spaceflux-server
     runtime: node
     rootDir: apps/server
     buildCommand: npm install

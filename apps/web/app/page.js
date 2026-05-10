@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
-const THEME_STORAGE_KEY = "siteshare-theme";
+const THEME_STORAGE_KEY = "spaceflux-theme";
 const POINTER_BREAKPOINT = 820;
 const PHONE_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const DESKTOP_FILE_LIMIT_BYTES = 100 * 1024 * 1024;
@@ -741,7 +741,7 @@ export default function Page() {
     const downloadUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = downloadUrl;
-    anchor.download = transferState.metadata.filename || `siteshare-${transferId}`;
+    anchor.download = transferState.metadata.filename || `spaceflux-${transferId}`;
     anchor.click();
     URL.revokeObjectURL(downloadUrl);
 
@@ -765,7 +765,7 @@ export default function Page() {
       <main className="auth-shell">
         <div className="auth-hero">
           <span className="eyebrow">Hybrid Realtime Collaboration</span>
-          <h1>SiteShare</h1>
+          <h1>SpaceFlux</h1>
           <p>
             Create rooms, chat live, share files peer-to-peer, and collaborate with live pointers on desktop.
           </p>
@@ -780,7 +780,7 @@ export default function Page() {
 
           {authMode === "register" ? (
             <label>
-              Display name
+              Nickname
               <input
                 value={authForm.displayName}
                 onChange={(event) => setAuthForm((current) => ({ ...current, displayName: event.target.value }))}
@@ -836,7 +836,7 @@ export default function Page() {
         <div className="brand-card">
           <div className="avatar-badge">{initialsFromName(user.displayName)}</div>
           <div>
-            <h1>SiteShare</h1>
+            <h1>SpaceFlux</h1>
             <p>{user.displayName}</p>
           </div>
         </div>

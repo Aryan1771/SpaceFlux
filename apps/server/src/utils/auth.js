@@ -1,7 +1,7 @@
 import argon2 from "argon2";
 import crypto from "node:crypto";
 
-const SESSION_COOKIE_NAME = "siteshare_session";
+const SESSION_COOKIE_NAME = "spaceflux_session";
 const SESSION_DURATION_DAYS = 14;
 
 export const cookieName = SESSION_COOKIE_NAME;

@@ -303,7 +303,7 @@ async function closeUserSession(req, res) {
 app.get("/ping", (_req, res) => {
   res.json({
     ok: true,
-    service: "siteshare",
+    service: "spaceflux",
     timestamp: new Date().toISOString()
   });
 });
@@ -833,6 +833,6 @@ wsServer.on("close", () => {
 });
 
 server.listen(PORT, () => {
-  console.log(`SiteShare server listening on http://0.0.0.0:${PORT}`);
+  console.log(`SpaceFlux server listening on http://0.0.0.0:${PORT}`);
   console.log(`Allowed frontend origin: ${FRONTEND_ORIGIN}`);
 });
