@@ -804,7 +804,7 @@ export default function Page() {
               <input
                 value={authForm.displayName}
                 onChange={(event) => setAuthForm((current) => ({ ...current, displayName: event.target.value }))}
-                placeholder="Aryan"
+                placeholder="Nickname"
               />
             </label>
           ) : null}
