@@ -32,3 +32,6 @@ Thumbs.db
 # misc
 tmp/
 cache/
+
+# local asset drop zone
+/Cool_cursor.cur

@@ -101,6 +101,8 @@ export default function Page() {
   const [isCompactLayout, setIsCompactLayout] = useState(false);
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [showLaunchOverlay, setShowLaunchOverlay] = useState(false);
+  const [hasPrimedWorkspace, setHasPrimedWorkspace] = useState(false);
 
   const socketRef = useRef(null);
   const activeRoomIdRef = useRef("");
@@ -158,9 +160,13 @@ export default function Page() {
         if (cancelled) {
           return;
         }
+        setShowLaunchOverlay(Boolean(me.user));
+        setHasPrimedWorkspace(false);
         setUser(me.user);
       } catch {
         if (!cancelled) {
+          setShowLaunchOverlay(false);
+          setHasPrimedWorkspace(false);
           setUser(null);
         }
       }
@@ -185,6 +191,8 @@ export default function Page() {
       setFileTransfers([]);
       setMembers([]);
       setPointers([]);
+      setShowLaunchOverlay(false);
+      setHasPrimedWorkspace(false);
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
@@ -249,6 +257,8 @@ export default function Page() {
       setRooms(response.rooms);
       if (!response.rooms.length) {
         setActiveRoomId("");
+        setHasPrimedWorkspace(true);
+        setShowLaunchOverlay(false);
         return;
       }
 
@@ -265,6 +275,8 @@ export default function Page() {
       });
     } catch (error) {
       setGlobalError(error.message);
+      setHasPrimedWorkspace(true);
+      setShowLaunchOverlay(false);
     }
   }
 
@@ -281,9 +293,13 @@ export default function Page() {
       setMessages(messagesResponse.messages);
       setFileTransfers(filesResponse.files);
       setRoomLoadState("ready");
+      setHasPrimedWorkspace(true);
+      setShowLaunchOverlay(false);
     } catch (error) {
       setGlobalError(error.message);
       setRoomLoadState("error");
+      setHasPrimedWorkspace(true);
+      setShowLaunchOverlay(false);
     }
   }
 
@@ -410,6 +426,8 @@ export default function Page() {
     try {
       const action = authMode === "login" ? api.login : api.register;
       const response = await action(authForm);
+      setShowLaunchOverlay(true);
+      setHasPrimedWorkspace(false);
       setUser(response.user);
       setAuthForm({ displayName: "", email: "", password: "" });
     } catch (error) {
@@ -420,6 +438,8 @@ export default function Page() {
   async function handleLogout() {
     try {
       await api.logout();
+      setShowLaunchOverlay(false);
+      setHasPrimedWorkspace(false);
       setUser(null);
       setInfoMessage("Logged out");
     } catch (error) {
@@ -831,8 +851,10 @@ export default function Page() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <>
+      {showLaunchOverlay ? <LaunchOverlay hasPrimedWorkspace={hasPrimedWorkspace} /> : null}
+      <main className="app-shell">
+        <aside className="sidebar">
         <div className="brand-card">
           <div className="avatar-badge">{initialsFromName(user.displayName)}</div>
           <div>
@@ -896,11 +918,11 @@ export default function Page() {
           <ThemePicker theme={theme} setTheme={setTheme} compact />
           <button className="ghost-button" onClick={handleLogout} type="button">Logout</button>
         </div>
-      </aside>
+        </aside>
 
-      <section className="workspace">
-        {activeRoom ? (
-          <>
+        <section className="workspace">
+          {activeRoom ? (
+            <>
             <header className="workspace-header">
               <div>
                 <p className="eyebrow">Active room</p>
@@ -987,7 +1009,7 @@ export default function Page() {
                           <div>
                             <strong>{transfer.filename}</strong>
                             <p>
-                              {transfer.senderName} → {transfer.recipientName || "Room"} · {formatBytes(transfer.sizeBytes)}
+                              {transfer.senderName} to {transfer.recipientName || "Room"} - {formatBytes(transfer.sizeBytes)}
                             </p>
                           </div>
                           <div className="transfer-actions">
@@ -1064,15 +1086,16 @@ export default function Page() {
                 )}
               </div>
             </div>
-          </>
-        ) : (
-          <div className="empty-room-state">
-            <h2>No active room</h2>
-            <p>Create a room or join one with a code to start chatting and sharing files.</p>
-          </div>
-        )}
-      </section>
-    </main>
+            </>
+          ) : (
+            <div className="empty-room-state">
+              <h2>No active room</h2>
+              <p>Create a room or join one with a code to start chatting and sharing files.</p>
+            </div>
+          )}
+        </section>
+      </main>
+    </>
   );
 }
 
@@ -1089,6 +1112,42 @@ function ThemePicker({ theme, setTheme, compact = false }) {
           {option}
         </button>
       ))}
+    </div>
+  );
+}
+
+function LaunchOverlay({ hasPrimedWorkspace }) {
+  return (
+    <div className="launch-overlay" aria-live="polite" aria-label="Loading SpaceFlux workspace">
+      <div className="launch-core">
+        <div className="black-hole-mark" aria-hidden="true">
+          <div className="black-hole-ring ring-one" />
+          <div className="black-hole-ring ring-two" />
+          <div className="black-hole-center" />
+          <div className="black-hole-glow" />
+        </div>
+        <div className="launch-copy">
+          <span className="eyebrow">SpaceFlux Launch Sequence</span>
+          <h2>Warping your rooms into view</h2>
+          <p>
+            The rocket loops until your workspace is ready, then the dashboard takes over.
+          </p>
+        </div>
+        <div className={`rocket-lane ${hasPrimedWorkspace ? "ready" : ""}`} aria-hidden="true">
+          <div className="rocket">
+            <span className="rocket-window" />
+            <span className="rocket-wing rocket-wing-left" />
+            <span className="rocket-wing rocket-wing-right" />
+            <span className="rocket-fin rocket-fin-left" />
+            <span className="rocket-fin rocket-fin-right" />
+            <span className="rocket-engine">
+              <span className="rocket-flame flame-core" />
+              <span className="rocket-flame flame-outer" />
+            </span>
+          </div>
+          <div className="rocket-trail" />
+        </div>
+      </div>
     </div>
   );
 }

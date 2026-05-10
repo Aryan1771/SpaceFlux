@@ -48,6 +48,19 @@ body {
   min-height: 100vh;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  body,
+  button,
+  input,
+  select,
+  label,
+  .room-tile,
+  .file-picker,
+  .theme-chip {
+    cursor: url("/Cool_cursor.cur"), auto;
+  }
+}
+
 button,
 input,
 select {
@@ -149,6 +162,260 @@ main {
   border-radius: 18px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
+}
+
+.launch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at center, rgba(31, 122, 236, 0.18), transparent 28%),
+    radial-gradient(circle at center, rgba(2, 6, 23, 0.3), transparent 58%),
+    rgba(6, 10, 18, 0.78);
+  backdrop-filter: blur(22px);
+}
+
+.launch-core {
+  width: min(92vw, 760px);
+  min-height: 520px;
+  padding: 2rem;
+  border-radius: 34px;
+  border: 1px solid rgba(151, 178, 255, 0.18);
+  background: linear-gradient(180deg, rgba(8, 14, 28, 0.94), rgba(14, 22, 40, 0.86));
+  box-shadow: 0 30px 120px rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.launch-core::before,
+.launch-core::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.launch-core::before {
+  width: 4px;
+  height: 4px;
+  top: 16%;
+  left: 14%;
+  box-shadow:
+    180px 40px 0 rgba(255, 255, 255, 0.12),
+    280px 120px 0 rgba(255, 255, 255, 0.07),
+    -30px 220px 0 rgba(255, 255, 255, 0.09),
+    240px 300px 0 rgba(255, 255, 255, 0.08),
+    -120px 340px 0 rgba(255, 255, 255, 0.11);
+}
+
+.launch-core::after {
+  inset: auto;
+  width: 520px;
+  height: 520px;
+  border: 1px solid rgba(104, 168, 255, 0.08);
+  background: transparent;
+}
+
+.launch-copy {
+  display: grid;
+  gap: 0.8rem;
+  max-width: 420px;
+  position: relative;
+  z-index: 2;
+}
+
+.launch-copy h2 {
+  margin: 0;
+  color: #edf2ff;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.launch-copy p {
+  margin: 0;
+  color: rgba(237, 242, 255, 0.72);
+  font-size: 1rem;
+}
+
+.black-hole-mark {
+  position: relative;
+  width: 170px;
+  height: 170px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 1.6rem;
+}
+
+.black-hole-center {
+  width: 74px;
+  height: 74px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.12), transparent 18%),
+    radial-gradient(circle at center, #02030a 0 52%, #0b1020 68%, #02030a 100%);
+  box-shadow:
+    0 0 0 12px rgba(31, 122, 236, 0.07),
+    0 0 26px rgba(31, 122, 236, 0.18);
+  position: relative;
+  z-index: 3;
+}
+
+.black-hole-ring {
+  position: absolute;
+  border-radius: 999px;
+  border: 1px solid rgba(104, 168, 255, 0.2);
+  transform-origin: center;
+}
+
+.ring-one {
+  width: 140px;
+  height: 42px;
+  background: linear-gradient(90deg, rgba(31, 122, 236, 0.05), rgba(104, 168, 255, 0.24), rgba(31, 122, 236, 0.05));
+  transform: rotate(14deg);
+  animation: ringSpin 6s linear infinite;
+}
+
+.ring-two {
+  width: 154px;
+  height: 48px;
+  background: linear-gradient(90deg, rgba(79, 211, 154, 0.06), rgba(104, 168, 255, 0.2), rgba(79, 211, 154, 0.06));
+  transform: rotate(-18deg);
+  animation: ringSpinReverse 7.5s linear infinite;
+}
+
+.black-hole-glow {
+  position: absolute;
+  width: 190px;
+  height: 190px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(31, 122, 236, 0.18), transparent 62%);
+  filter: blur(12px);
+}
+
+.rocket-lane {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rocket,
+.rocket-trail {
+  position: absolute;
+  left: 50%;
+}
+
+.rocket {
+  width: 44px;
+  height: 116px;
+  bottom: 68px;
+  margin-left: -22px;
+  border-radius: 24px 24px 16px 16px;
+  background: linear-gradient(180deg, #f8fbff 0%, #a9c7ff 46%, #6b8fe2 100%);
+  box-shadow:
+    inset 0 -12px 18px rgba(17, 41, 84, 0.18),
+    0 20px 34px rgba(10, 20, 45, 0.32);
+  animation: rocketLaunch 2.8s linear infinite;
+  z-index: 2;
+}
+
+.rocket-window {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #0d1b34;
+  top: 26px;
+  left: 14px;
+  box-shadow: 0 0 0 4px rgba(237, 242, 255, 0.45);
+}
+
+.rocket-wing,
+.rocket-fin {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.rocket-wing-left {
+  border-width: 16px 14px 10px 0;
+  border-color: transparent rgba(104, 168, 255, 0.92) transparent transparent;
+  left: -12px;
+  top: 44px;
+}
+
+.rocket-wing-right {
+  border-width: 16px 0 10px 14px;
+  border-color: transparent transparent transparent rgba(104, 168, 255, 0.92);
+  right: -12px;
+  top: 44px;
+}
+
+.rocket-fin-left {
+  border-width: 22px 12px 0 0;
+  border-color: rgba(255, 122, 76, 0.95) transparent transparent transparent;
+  left: 1px;
+  bottom: 12px;
+}
+
+.rocket-fin-right {
+  border-width: 22px 0 0 12px;
+  border-color: rgba(255, 122, 76, 0.95) transparent transparent transparent;
+  right: 1px;
+  bottom: 12px;
+}
+
+.rocket-engine {
+  position: absolute;
+  left: 50%;
+  bottom: -18px;
+  width: 18px;
+  height: 36px;
+  margin-left: -9px;
+}
+
+.rocket-flame {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+}
+
+.flame-core {
+  width: 12px;
+  height: 28px;
+  background: linear-gradient(180deg, #fff4bf 0%, #ff9a3c 55%, #ef4d2c 100%);
+  filter: blur(0.2px);
+  animation: flamePulse 0.22s ease-in-out infinite alternate;
+}
+
+.flame-outer {
+  width: 20px;
+  height: 34px;
+  top: 2px;
+  background: radial-gradient(circle at top, rgba(255, 240, 177, 0.5), rgba(255, 104, 45, 0.72), transparent 74%);
+  filter: blur(4px);
+  animation: flamePulseOuter 0.28s ease-in-out infinite alternate;
+}
+
+.rocket-trail {
+  width: 4px;
+  height: 160px;
+  bottom: 18px;
+  margin-left: -2px;
+  background: linear-gradient(180deg, rgba(125, 183, 255, 0), rgba(125, 183, 255, 0.48), rgba(255, 145, 74, 0));
+  opacity: 0;
+  animation: trailLaunch 2.8s linear infinite;
+}
+
+.rocket-lane.ready .rocket,
+.rocket-lane.ready .rocket-trail {
+  animation-play-state: paused;
+  opacity: 0;
 }
 
 .primary-button,
@@ -521,6 +788,67 @@ main {
   background: var(--bg-elevated);
 }
 
+@keyframes ringSpin {
+  from { transform: rotate(14deg); }
+  to { transform: rotate(374deg); }
+}
+
+@keyframes ringSpinReverse {
+  from { transform: rotate(-18deg); }
+  to { transform: rotate(-378deg); }
+}
+
+@keyframes rocketLaunch {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  68% {
+    transform: translateY(-180px) scale(1.02);
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(-180px) scale(1.02);
+    opacity: 1;
+  }
+  81% {
+    transform: translateY(0) scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes trailLaunch {
+  0%, 10% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  24%, 72% {
+    opacity: 1;
+    transform: translateY(-100px);
+  }
+  81%, 100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes flamePulse {
+  from { transform: translateX(-50%) scaleY(0.82); }
+  to { transform: translateX(-50%) scaleY(1.18); }
+}
+
+@keyframes flamePulseOuter {
+  from { transform: translateX(-50%) scale(0.9); opacity: 0.72; }
+  to { transform: translateX(-50%) scale(1.14); opacity: 1; }
+}
+
 @media (max-width: 1180px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -568,5 +896,20 @@ main {
 
   .header-actions {
     justify-content: start;
+  }
+
+  .launch-core {
+    min-height: 460px;
+    padding: 1.5rem;
+  }
+
+  .black-hole-mark {
+    width: 140px;
+    height: 140px;
+    margin-bottom: 1rem;
+  }
+
+  .launch-copy h2 {
+    font-size: 2rem;
   }
 }
