@@ -1,0 +1,18 @@
+{
+  "name": "siteshare",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @siteshare/server\" \"npm run dev --workspace @siteshare/web\"",
+    "dev:web": "npm run dev --workspace @siteshare/web",
+    "dev:server": "npm run dev --workspace @siteshare/server",
+    "build": "npm run build --workspace @siteshare/server && npm run build --workspace @siteshare/web",
+    "lint": "npm run lint --workspace @siteshare/server && npm run lint --workspace @siteshare/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

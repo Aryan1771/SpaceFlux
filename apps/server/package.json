@@ -1,0 +1,22 @@
+{
+  "name": "@siteshare/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "build": "node --check src/server.js",
+    "lint": "node --check src/server.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "argon2": "^0.43.0",
+    "cookie": "^1.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "nanoid": "^5.1.5",
+    "ws": "^8.18.3"
+  }
+}

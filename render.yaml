@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: siteshare-server
+    runtime: node
+    rootDir: apps/server
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /ping

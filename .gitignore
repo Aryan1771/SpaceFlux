@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+
+# builds
+.next/
+dist/
+coverage/
+
+# logs
+*.log
+npm-debug.log*
+
+# env
+.env
+.env.*
+!**/.env.example
+!**/.env.local.example
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.vercel/
+.turso/
+
+# Turso local artifacts
+*.db
+*.sqlite
+*.sqlite3
+
+# misc
+tmp/
+cache/
