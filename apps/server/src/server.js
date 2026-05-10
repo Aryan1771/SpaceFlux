@@ -38,6 +38,10 @@ const wsServer = new WebSocketServer({ server });
 const roomConnections = new Map();
 const socketState = new Map();
 
+const asyncHandler = (handler) => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
+
 app.use(cors({
   origin: CORS_ORIGIN,
   credentials: true
@@ -103,7 +107,7 @@ async function getUserFromSessionToken(token) {
   };
 }
 
-async function requireUser(req, res, next) {
+const requireUser = asyncHandler(async (req, res, next) => {
   const token = req.cookies[cookieName];
   const user = await getUserFromSessionToken(token);
 
@@ -114,7 +118,7 @@ async function requireUser(req, res, next) {
 
   req.user = user;
   next();
-}
+});
 
 async function userHasRoomAccess(userId, roomId) {
   const row = await queryOne(
@@ -308,10 +312,11 @@ app.get("/ping", (_req, res) => {
   });
 });
 
-app.post("/auth/register", async (req, res) => {
-  const email = normalizeEmail(req.body.email);
-  const password = String(req.body.password || "");
-  const displayName = normalizeName(req.body.displayName || email.split("@")[0]);
+app.post("/auth/register", asyncHandler(async (req, res) => {
+  const body = req.body ?? {};
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || "");
+  const displayName = normalizeName(body.displayName || email.split("@")[0]);
 
   if (!email || !password || password.length < 8 || !displayName) {
     res.status(400).json({ error: "Invalid registration payload" });
@@ -342,11 +347,12 @@ app.post("/auth/register", async (req, res) => {
       displayName
     }
   });
-});
+}));
 
-app.post("/auth/login", async (req, res) => {
-  const email = normalizeEmail(req.body.email);
-  const password = String(req.body.password || "");
+app.post("/auth/login", asyncHandler(async (req, res) => {
+  const body = req.body ?? {};
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || "");
 
   if (!email || !password) {
     res.status(400).json({ error: "Email and password are required" });
@@ -373,18 +379,18 @@ app.post("/auth/login", async (req, res) => {
       displayName: user.display_name
     }
   });
-});
+}));
 
-app.post("/auth/logout", requireUser, async (req, res) => {
+app.post("/auth/logout", requireUser, asyncHandler(async (req, res) => {
   await closeUserSession(req, res);
   res.json({ ok: true });
-});
+}));
 
-app.get("/me", requireUser, async (req, res) => {
+app.get("/me", requireUser, asyncHandler(async (req, res) => {
   res.json({ user: req.user });
-});
+}));
 
-app.get("/rooms", requireUser, async (req, res) => {
+app.get("/rooms", requireUser, asyncHandler(async (req, res) => {
   const rows = asPlainRows(await queryMany(
     `SELECT rooms.id, rooms.name, rooms.owner_id, rooms.join_code_display, rooms.created_at
      FROM room_members
@@ -395,10 +401,11 @@ app.get("/rooms", requireUser, async (req, res) => {
   ));
 
   res.json({ rooms: rows.map(shapeRoom) });
-});
+}));
 
-app.post("/rooms", requireUser, async (req, res) => {
-  const name = sanitizeRoomName(req.body.name);
+app.post("/rooms", requireUser, asyncHandler(async (req, res) => {
+  const body = req.body ?? {};
+  const name = sanitizeRoomName(body.name);
 
   if (!name) {
     res.status(400).json({ error: "Room name is required" });
@@ -426,10 +433,11 @@ app.post("/rooms", requireUser, async (req, res) => {
   )));
 
   res.status(201).json({ room });
-});
+}));
 
-app.post("/rooms/join", requireUser, async (req, res) => {
-  const code = normalizeCode(req.body.code);
+app.post("/rooms/join", requireUser, asyncHandler(async (req, res) => {
+  const body = req.body ?? {};
+  const code = normalizeCode(body.code);
 
   if (!code) {
     res.status(400).json({ error: "Room code is required" });
@@ -452,9 +460,9 @@ app.post("/rooms/join", requireUser, async (req, res) => {
   });
 
   res.json({ room: shapeRoom(room) });
-});
+}));
 
-app.post("/rooms/:roomId/leave", requireUser, async (req, res) => {
+app.post("/rooms/:roomId/leave", requireUser, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
   await db.execute({
@@ -463,9 +471,9 @@ app.post("/rooms/:roomId/leave", requireUser, async (req, res) => {
   });
 
   res.json({ ok: true });
-});
+}));
 
-app.get("/rooms/:roomId/messages", requireUser, async (req, res) => {
+app.get("/rooms/:roomId/messages", requireUser, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
   if (!(await userHasRoomAccess(req.user.id, roomId))) {
@@ -484,9 +492,9 @@ app.get("/rooms/:roomId/messages", requireUser, async (req, res) => {
   ));
 
   res.json({ messages: rows.reverse().map(shapeMessage) });
-});
+}));
 
-app.get("/rooms/:roomId/files", requireUser, async (req, res) => {
+app.get("/rooms/:roomId/files", requireUser, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
   if (!(await userHasRoomAccess(req.user.id, roomId))) {
@@ -508,11 +516,14 @@ app.get("/rooms/:roomId/files", requireUser, async (req, res) => {
   ));
 
   res.json({ files: rows.map(shapeFileTransfer) });
-});
+}));
 
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(500).json({ error: "Internal server error" });
+  res.status(500).json({
+    error: "Internal server error",
+    detail: process.env.NODE_ENV === "production" ? String(error.message || "Unexpected error") : error.stack
+  });
 });
 
 wsServer.on("connection", async (socket, request) => {
