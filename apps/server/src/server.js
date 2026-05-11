@@ -31,6 +31,7 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:3000";
 const CORS_ORIGIN = process.env.CORS_ORIGIN || FRONTEND_ORIGIN;
 const MAX_CHAT_HISTORY = 50;
 const POINTER_MIN_INTERVAL_MS = 75;
+const INSTANT_TRANSFER_BYTES = 1024 * 1024;
 
 const app = express();
 const server = http.createServer(app);
@@ -298,6 +299,10 @@ function getPresence(roomId) {
   }
 
   return [...entry.sockets.keys()];
+}
+
+function isUserOnlineInRoom(roomId, userId) {
+  return getPresence(roomId).includes(userId);
 }
 
 function broadcast(roomId, payload, options = {}) {
@@ -696,9 +701,10 @@ app.get("/rooms/:roomId/files", requireUser, asyncHandler(async (req, res) => {
      JOIN users sender ON sender.id = f.sender_id
      LEFT JOIN users recipient ON recipient.id = f.recipient_id
      WHERE f.room_id = ?
+       AND (f.sender_id = ? OR f.recipient_id = ?)
      ORDER BY f.created_at DESC
      LIMIT 50`,
-    [roomId]
+    [roomId, req.user.id, req.user.id]
   ));
 
   res.json({ files: rows.map(shapeFileTransfer) });
@@ -857,10 +863,12 @@ wsServer.on("connection", async (socket, request) => {
         }
 
         const transferId = nanoid();
+        const autoAccept = isUserOnlineInRoom(roomId, recipientUserId) && sizeBytes <= INSTANT_TRANSFER_BYTES;
+        const initialStatus = autoAccept ? "accepted" : "offered";
         await db.execute({
           sql: `INSERT INTO file_transfers (id, room_id, sender_id, recipient_id, filename, size_bytes, mime_type, status, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          args: [transferId, roomId, user.id, recipientUserId, filename, sizeBytes, mimeType, "offered", new Date().toISOString()]
+          args: [transferId, roomId, user.id, recipientUserId, filename, sizeBytes, mimeType, initialStatus, new Date().toISOString()]
         });
 
         const transfer = shapeFileTransfer(asPlainRow(await queryOne(
@@ -889,6 +897,13 @@ wsServer.on("connection", async (socket, request) => {
             clientOfferId
           }
         }, { onlyUserId: user.id });
+
+        if (autoAccept) {
+          broadcast(roomId, {
+            type: "file:status",
+            payload: transfer
+          }, { onlyUserId: recipientUserId });
+        }
         return;
       }
 
@@ -936,7 +951,7 @@ wsServer.on("connection", async (socket, request) => {
         const transferId = String(message.payload?.transferId || "");
 
         const transfer = asPlainRow(await queryOne(
-          "SELECT id, room_id FROM file_transfers WHERE id = ?",
+          "SELECT id, room_id, sender_id, recipient_id FROM file_transfers WHERE id = ?",
           [transferId]
         ));
 
@@ -963,6 +978,18 @@ wsServer.on("connection", async (socket, request) => {
         broadcast(transfer.room_id, {
           type: "file:status",
           payload: updatedTransfer
+        }, { onlyUserId: transfer.sender_id });
+
+        if (transfer.recipient_id) {
+          broadcast(transfer.room_id, {
+            type: "file:status",
+            payload: updatedTransfer
+          }, { onlyUserId: transfer.recipient_id });
+        }
+
+        await db.execute({
+          sql: "DELETE FROM file_transfers WHERE id = ?",
+          args: [transferId]
         });
         return;
       }
@@ -971,7 +998,7 @@ wsServer.on("connection", async (socket, request) => {
         const transferId = String(message.payload?.transferId || "");
 
         const transfer = asPlainRow(await queryOne(
-          "SELECT id, room_id FROM file_transfers WHERE id = ?",
+          "SELECT id, room_id, sender_id, recipient_id FROM file_transfers WHERE id = ?",
           [transferId]
         ));
 
@@ -998,7 +1025,13 @@ wsServer.on("connection", async (socket, request) => {
         broadcast(transfer.room_id, {
           type: "file:status",
           payload: updatedTransfer
-        });
+        }, { onlyUserId: transfer.sender_id });
+        if (transfer.recipient_id) {
+          broadcast(transfer.room_id, {
+            type: "file:status",
+            payload: updatedTransfer
+          }, { onlyUserId: transfer.recipient_id });
+        }
         return;
       }
 

@@ -7,6 +7,7 @@ import { api, getStoredSessionToken } from "../lib/api";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
 const THEME_STORAGE_KEY = "spaceflux-theme";
 const POINTER_BREAKPOINT = 820;
+const INSTANT_TRANSFER_BYTES = 1024 * 1024;
 const PHONE_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const DESKTOP_FILE_LIMIT_BYTES = 100 * 1024 * 1024;
 const TRANSFER_TIMEOUT_MS = 20000;
@@ -122,12 +123,15 @@ export default function Page() {
   const [infoMessage, setInfoMessage] = useState("");
   const [socketStatus, setSocketStatus] = useState("disconnected");
   const [isCompactLayout, setIsCompactLayout] = useState(false);
-  const [selectedRecipientId, setSelectedRecipientId] = useState("");
+  const [primaryRecipientId, setPrimaryRecipientId] = useState("");
+  const [ccRecipientIds, setCcRecipientIds] = useState([]);
+  const [bccRecipientIds, setBccRecipientIds] = useState([]);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editingMessageDraft, setEditingMessageDraft] = useState("");
   const [showLaunchOverlay, setShowLaunchOverlay] = useState(false);
   const [hasPrimedWorkspace, setHasPrimedWorkspace] = useState(false);
+  const [isPointerStageExpanded, setIsPointerStageExpanded] = useState(false);
 
   const socketRef = useRef(null);
   const activeRoomIdRef = useRef("");
@@ -145,6 +149,7 @@ export default function Page() {
 
   const isAuthenticated = Boolean(user);
   const recipients = members.filter((member) => member.userId !== user?.id);
+  const currentMaxFileSize = isCompactLayout ? PHONE_FILE_LIMIT_BYTES : DESKTOP_FILE_LIMIT_BYTES;
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY) || "system";
@@ -176,6 +181,12 @@ export default function Page() {
     applyTheme(theme);
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,6 +282,13 @@ export default function Page() {
       joinedRoomRef.current = activeRoomId;
     }
   }, [activeRoomId, user]);
+
+  useEffect(() => {
+    const validRecipientIds = new Set(recipients.map((member) => member.userId));
+    setPrimaryRecipientId((current) => validRecipientIds.has(current) ? current : (recipients[0]?.userId || ""));
+    setCcRecipientIds((current) => current.filter((userId) => validRecipientIds.has(userId)));
+    setBccRecipientIds((current) => current.filter((userId) => validRecipientIds.has(userId)));
+  }, [recipients, activeRoomId, user?.id]);
 
   useEffect(() => {
     return () => {
@@ -435,9 +453,9 @@ export default function Page() {
         }
         setMembers(message.payload.members || []);
         setPointers(message.payload.pointers || []);
-        if (!selectedRecipientId && message.payload.members?.length) {
+        if (!primaryRecipientId && message.payload.members?.length) {
           const nextRecipient = message.payload.members.find((member) => member.userId !== user?.id);
-          setSelectedRecipientId(nextRecipient?.userId || "");
+          setPrimaryRecipientId(nextRecipient?.userId || "");
         }
         return;
       }
@@ -522,6 +540,10 @@ export default function Page() {
           });
           closeTransferPeer(message.payload.id);
           setInfoMessage(`Transfer complete: ${message.payload.filename || message.payload.id}`);
+          window.setTimeout(() => {
+            setFileTransfers((current) => current.filter((transfer) => transfer.id !== message.payload.id));
+            clearTransferRuntime(message.payload.id);
+          }, 1200);
         }
 
         if (message.payload.status === "failed" || message.payload.status === "rejected") {
@@ -742,44 +764,62 @@ export default function Page() {
     }
   }
 
+  function toggleRecipient(list, userId) {
+    return list.includes(userId)
+      ? list.filter((item) => item !== userId)
+      : [...list, userId];
+  }
+
+  function getTransferRecipients() {
+    const uniqueIds = new Set([
+      primaryRecipientId,
+      ...ccRecipientIds,
+      ...bccRecipientIds
+    ].filter(Boolean));
+
+    return [...uniqueIds];
+  }
+
   async function handleFileSelection(event) {
     const file = event.target.files?.[0];
-    if (!file || !activeRoomId || !selectedRecipientId) {
+    const recipientIds = getTransferRecipients();
+    if (!file || !activeRoomId || !recipientIds.length) {
       return;
     }
 
-    const maxBytes = isCompactLayout ? PHONE_FILE_LIMIT_BYTES : DESKTOP_FILE_LIMIT_BYTES;
-    if (file.size > maxBytes) {
-      setGlobalError(`File is too large. Limit is ${formatBytes(maxBytes)} on this device class.`);
+    if (file.size > currentMaxFileSize) {
+      setGlobalError(`File is too large. Limit is ${formatBytes(currentMaxFileSize)} on this device class.`);
       setFileInputKey((current) => current + 1);
       return;
     }
 
-    const clientOfferId = crypto.randomUUID();
-    pendingOutgoingFilesRef.current.set(clientOfferId, {
-      file,
-      recipientUserId: selectedRecipientId
-    });
-    updateTransferRuntime(clientOfferId, {
-      totalBytes: file.size,
-      transferredBytes: 0,
-      phase: "offered"
-    });
+    for (const recipientUserId of recipientIds) {
+      const clientOfferId = crypto.randomUUID();
+      pendingOutgoingFilesRef.current.set(clientOfferId, {
+        file,
+        recipientUserId
+      });
+      updateTransferRuntime(clientOfferId, {
+        totalBytes: file.size,
+        transferredBytes: 0,
+        phase: "offered"
+      });
 
-    sendSocket({
-      type: "file:offer",
-      payload: {
-        roomId: activeRoomId,
-        recipientUserId: selectedRecipientId,
-        filename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        sizeBytes: file.size,
-        clientOfferId
-      }
-    });
+      sendSocket({
+        type: "file:offer",
+        payload: {
+          roomId: activeRoomId,
+          recipientUserId,
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          clientOfferId
+        }
+      });
+    }
 
     setFileInputKey((current) => current + 1);
-    setInfoMessage(`Offer sent for ${file.name}`);
+    setInfoMessage(`Transfer queued for ${file.name}`);
   }
 
   async function beginSendingTransfer(transferId, recipientUserId) {
@@ -1319,19 +1359,34 @@ export default function Page() {
                     <span>{isCompactLayout ? "Phone mode" : "Desktop mode"}</span>
                   </div>
 
-                  <div className="file-toolbar">
-                    <select
-                      value={selectedRecipientId}
-                      onChange={(event) => setSelectedRecipientId(event.target.value)}
-                    >
-                      <option value="">Choose recipient</option>
-                      {recipients.map((member) => (
-                        <option key={member.userId} value={member.userId}>
-                          {member.displayName}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="file-limits-note">
+                    <span>* Instant transfer target: {formatBytes(INSTANT_TRANSFER_BYTES)} when the recipient is online</span>
+                    <span>Max allowed here: {formatBytes(currentMaxFileSize)}</span>
+                  </div>
 
+                  <div className="recipient-grid">
+                    <RecipientPicker
+                      label="To"
+                      recipients={recipients}
+                      selectedIds={primaryRecipientId ? [primaryRecipientId] : []}
+                      onToggle={(userId) => setPrimaryRecipientId((current) => current === userId ? "" : userId)}
+                      singleSelect
+                    />
+                    <RecipientPicker
+                      label="Cc"
+                      recipients={recipients.filter((member) => member.userId !== primaryRecipientId)}
+                      selectedIds={ccRecipientIds}
+                      onToggle={(userId) => setCcRecipientIds((current) => toggleRecipient(current, userId))}
+                    />
+                    <RecipientPicker
+                      label="Bcc"
+                      recipients={recipients.filter((member) => member.userId !== primaryRecipientId)}
+                      selectedIds={bccRecipientIds}
+                      onToggle={(userId) => setBccRecipientIds((current) => toggleRecipient(current, userId))}
+                    />
+                  </div>
+
+                  <div className="file-toolbar">
                     <label className="file-picker">
                       <input
                         key={fileInputKey}
@@ -1412,42 +1467,31 @@ export default function Page() {
                     ))}
                   </div>
                 </div>
-
-                {!isCompactLayout ? (
-                  <div className="panel pointer-panel">
-                    <div className="panel-header">
-                      <h3>Pointer stage</h3>
-                      <span>Desktop only</span>
-                    </div>
-                    <div className="pointer-surface" onMouseMove={handlePointerMove}>
-                      {pointers.map((pointer) => (
-                        <div
-                          key={pointer.userId}
-                          className="pointer-avatar"
-                          style={{
-                            left: `${pointer.x * 100}%`,
-                            top: `${pointer.y * 100}%`,
-                            borderColor: pointer.color
-                          }}
-                        >
-                          <span style={{ background: pointer.color }}>{initialsFromName(pointer.displayName)}</span>
-                          <small>{pointer.displayName}</small>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="panel compact-note">
-                    <div className="panel-header">
-                      <h3>Mobile view</h3>
-                    </div>
-                    <p className="muted-text">
-                      Pointer sharing is hidden on smaller screens so chat and file transfer stay easy to use on phones.
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
+            {!isCompactLayout ? (
+              <div className="panel pointer-panel pointer-panel-expanded">
+                <div className="panel-header">
+                  <h3>Pointer stage</h3>
+                  <div className="pointer-panel-actions">
+                    <span>Desktop only</span>
+                    <button className="secondary-button" type="button" onClick={() => setIsPointerStageExpanded(true)}>
+                      Expand stage
+                    </button>
+                  </div>
+                </div>
+                <PointerSurface pointers={pointers} onMouseMove={handlePointerMove} />
+              </div>
+            ) : (
+              <div className="panel compact-note">
+                <div className="panel-header">
+                  <h3>Mobile view</h3>
+                </div>
+                <p className="muted-text">
+                  Pointer sharing is hidden on smaller screens so chat and file transfer stay easy to use on phones.
+                </p>
+              </div>
+            )}
             </>
           ) : (
             <div className="empty-room-state">
@@ -1456,6 +1500,22 @@ export default function Page() {
             </div>
           )}
         </section>
+        {isPointerStageExpanded && !isCompactLayout ? (
+          <div className="pointer-stage-overlay">
+            <div className="pointer-stage-frame">
+              <div className="panel-header">
+                <div>
+                  <h3>Pointer stage</h3>
+                  <p className="muted-text">Shared cursors fill the full stage with each nickname shown above its cursor.</p>
+                </div>
+                <button className="ghost-button" type="button" onClick={() => setIsPointerStageExpanded(false)}>
+                  Close stage
+                </button>
+              </div>
+              <PointerSurface pointers={pointers} onMouseMove={handlePointerMove} immersive />
+            </div>
+          </div>
+        ) : null}
       </main>
     </>
   );
@@ -1473,6 +1533,55 @@ function ThemePicker({ theme, setTheme, compact = false }) {
         >
           {option}
         </button>
+      ))}
+    </div>
+  );
+}
+
+function RecipientPicker({ label, recipients, selectedIds, onToggle, singleSelect = false }) {
+  return (
+    <div className="recipient-picker">
+      <div className="recipient-picker-header">
+        <strong>{label}</strong>
+        <span>{selectedIds.length ? `${selectedIds.length} selected` : "None"}</span>
+      </div>
+      <div className="recipient-chip-list">
+        {recipients.map((member) => {
+          const selected = selectedIds.includes(member.userId);
+          return (
+            <button
+              key={`${label}-${member.userId}`}
+              className={`recipient-chip ${selected ? "active" : ""}`}
+              type="button"
+              onClick={() => onToggle(member.userId)}
+            >
+              <span className="member-dot" style={{ background: member.color }} />
+              <span>{member.displayName}</span>
+              {singleSelect ? <small>{selected ? "Primary" : "Set"}</small> : null}
+            </button>
+          );
+        })}
+        {!recipients.length ? <p className="muted-text">No eligible recipients</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function PointerSurface({ pointers, onMouseMove, immersive = false }) {
+  return (
+    <div className={`pointer-surface ${immersive ? "immersive" : ""}`} onMouseMove={onMouseMove}>
+      {pointers.map((pointer) => (
+        <div
+          key={pointer.userId}
+          className="pointer-avatar"
+          style={{
+            left: `${pointer.x * 100}%`,
+            top: `${pointer.y * 100}%`
+          }}
+        >
+          <small className="pointer-label">{pointer.displayName}</small>
+          <span className="pointer-glyph" aria-hidden="true" />
+        </div>
       ))}
     </div>
   );
