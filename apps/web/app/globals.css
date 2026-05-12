@@ -861,6 +861,30 @@ main {
   justify-items: end;
 }
 
+.received-downloads {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.received-downloads h4 {
+  margin: 0;
+}
+
+.received-download-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  border-radius: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 0.9rem 1rem;
+}
+
+.received-download-card p {
+  margin: 0.3rem 0 0;
+}
+
 .status-text {
   color: var(--muted);
   font-size: 0.88rem;

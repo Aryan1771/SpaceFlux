@@ -102,6 +102,16 @@ function removeTransferRuntime(map, transferId) {
   return next;
 }
 
+function triggerBrowserDownload(url, filename) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 function arrayBufferToBase64(buffer) {
   let binary = "";
   const bytes = new Uint8Array(buffer);
@@ -134,6 +144,7 @@ export default function Page() {
   const [messages, setMessages] = useState([]);
   const [fileTransfers, setFileTransfers] = useState([]);
   const [transferRuntime, setTransferRuntime] = useState({});
+  const [receivedDownloads, setReceivedDownloads] = useState([]);
   const [members, setMembers] = useState([]);
   const [pointers, setPointers] = useState([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -251,6 +262,10 @@ export default function Page() {
       setMessages([]);
       setFileTransfers([]);
       setTransferRuntime({});
+      setReceivedDownloads((current) => {
+        current.forEach((item) => URL.revokeObjectURL(item.url));
+        return [];
+      });
       setMembers([]);
       setPointers([]);
       setShowLaunchOverlay(false);
@@ -318,6 +333,10 @@ export default function Page() {
         window.clearTimeout(timeoutId);
       }
       transferTimeoutsRef.current.clear();
+      setReceivedDownloads((current) => {
+        current.forEach((item) => URL.revokeObjectURL(item.url));
+        return [];
+      });
       for (const connection of peerConnectionsRef.current.values()) {
         connection.close();
       }
@@ -1210,11 +1229,8 @@ export default function Page() {
       type: transferState.metadata.mimeType || "application/octet-stream"
     });
     const downloadUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = downloadUrl;
-    anchor.download = transferState.metadata.filename || `spaceflux-${transferId}`;
-    anchor.click();
-    URL.revokeObjectURL(downloadUrl);
+    const filename = transferState.metadata.filename || `spaceflux-${transferId}`;
+    triggerBrowserDownload(downloadUrl, filename);
 
     incomingTransfersRef.current.delete(transferId);
     if (notifyServer) {
@@ -1228,8 +1244,32 @@ export default function Page() {
       transferredBytes: Number(transferState.metadata.sizeBytes || transferState.receivedBytes || 0),
       phase: "complete"
     });
+    setReceivedDownloads((current) => [
+      {
+        id: transferId,
+        filename,
+        url: downloadUrl,
+        sizeBytes: Number(transferState.metadata.sizeBytes || transferState.receivedBytes || 0)
+      },
+      ...current.filter((item) => item.id !== transferId)
+    ]);
     closeTransferPeer(transferId);
-    setInfoMessage(`Downloaded ${transferState.metadata.filename}`);
+    setInfoMessage(`File ready to save: ${filename}`);
+  }
+
+  function handleSaveReceivedFile(download) {
+    triggerBrowserDownload(download.url, download.filename);
+    setInfoMessage(`Saving ${download.filename}`);
+  }
+
+  function dismissReceivedFile(downloadId) {
+    setReceivedDownloads((current) => {
+      const target = current.find((item) => item.id === downloadId);
+      if (target) {
+        URL.revokeObjectURL(target.url);
+      }
+      return current.filter((item) => item.id !== downloadId);
+    });
   }
 
   function acceptTransfer(transferId) {
@@ -1523,6 +1563,28 @@ export default function Page() {
                   </div>
 
                   <div className="transfer-list">
+                    {receivedDownloads.length ? (
+                      <div className="received-downloads">
+                        <h4>Received files</h4>
+                        {receivedDownloads.map((download) => (
+                          <article className="received-download-card" key={download.id}>
+                            <div>
+                              <strong>{download.filename}</strong>
+                              <p>{formatBytes(download.sizeBytes)} ready on this device</p>
+                            </div>
+                            <div className="message-actions">
+                              <button className="primary-button" type="button" onClick={() => handleSaveReceivedFile(download)}>
+                                Save file
+                              </button>
+                              <button className="ghost-button" type="button" onClick={() => dismissReceivedFile(download.id)}>
+                                Dismiss
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+
                     {fileTransfers.map((transfer) => {
                       const canAccept = transfer.recipientId === user.id && transfer.status === "offered";
                       const runtime = transferRuntime[transfer.id] || transferRuntime[transfer.clientOfferId];
