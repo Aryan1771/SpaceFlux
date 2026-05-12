@@ -1035,6 +1035,50 @@ wsServer.on("connection", async (socket, request) => {
         return;
       }
 
+      if (message.type === "file:direct-start" || message.type === "file:direct-chunk" || message.type === "file:direct-complete") {
+        const transferId = String(message.payload?.transferId || "");
+        const transfer = asPlainRow(await queryOne(
+          "SELECT id, room_id, sender_id, recipient_id, filename, size_bytes, mime_type FROM file_transfers WHERE id = ?",
+          [transferId]
+        ));
+
+        if (!transfer || transfer.sender_id !== user.id || !transfer.recipient_id) {
+          return;
+        }
+
+        if (message.type === "file:direct-start") {
+          broadcast(transfer.room_id, {
+            type: "file:direct-start",
+            payload: {
+              transferId,
+              filename: transfer.filename,
+              mimeType: transfer.mime_type,
+              sizeBytes: Number(transfer.size_bytes)
+            }
+          }, { onlyUserId: transfer.recipient_id });
+          return;
+        }
+
+        if (message.type === "file:direct-chunk") {
+          broadcast(transfer.room_id, {
+            type: "file:direct-chunk",
+            payload: {
+              transferId,
+              chunk: String(message.payload?.chunk || "")
+            }
+          }, { onlyUserId: transfer.recipient_id });
+          return;
+        }
+
+        broadcast(transfer.room_id, {
+          type: "file:direct-complete",
+          payload: {
+            transferId
+          }
+        }, { onlyUserId: transfer.recipient_id });
+        return;
+      }
+
       if (message.type === "webrtc:signal") {
         const roomId = String(message.payload?.roomId || "");
         const targetUserId = String(message.payload?.targetUserId || "");

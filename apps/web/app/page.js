@@ -102,11 +102,33 @@ function removeTransferRuntime(map, transferId) {
   return next;
 }
 
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+
+  return window.btoa(binary);
+}
+
+function base64ToUint8Array(value) {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
 export default function Page() {
   const [theme, setTheme] = useState("system");
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [authForm, setAuthForm] = useState({ displayName: "", email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
   const [rooms, setRooms] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState("");
   const [messages, setMessages] = useState([]);
@@ -123,9 +145,8 @@ export default function Page() {
   const [infoMessage, setInfoMessage] = useState("");
   const [socketStatus, setSocketStatus] = useState("disconnected");
   const [isCompactLayout, setIsCompactLayout] = useState(false);
-  const [primaryRecipientId, setPrimaryRecipientId] = useState("");
-  const [ccRecipientIds, setCcRecipientIds] = useState([]);
-  const [bccRecipientIds, setBccRecipientIds] = useState([]);
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState([]);
+  const [hideTransferRecipients, setHideTransferRecipients] = useState(true);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editingMessageDraft, setEditingMessageDraft] = useState("");
@@ -285,9 +306,10 @@ export default function Page() {
 
   useEffect(() => {
     const validRecipientIds = new Set(recipients.map((member) => member.userId));
-    setPrimaryRecipientId((current) => validRecipientIds.has(current) ? current : (recipients[0]?.userId || ""));
-    setCcRecipientIds((current) => current.filter((userId) => validRecipientIds.has(userId)));
-    setBccRecipientIds((current) => current.filter((userId) => validRecipientIds.has(userId)));
+    setSelectedRecipientIds((current) => {
+      const filtered = current.filter((userId) => validRecipientIds.has(userId));
+      return filtered.length ? filtered : (recipients[0]?.userId ? [recipients[0].userId] : []);
+    });
   }, [recipients, activeRoomId, user?.id]);
 
   useEffect(() => {
@@ -453,9 +475,9 @@ export default function Page() {
         }
         setMembers(message.payload.members || []);
         setPointers(message.payload.pointers || []);
-        if (!primaryRecipientId && message.payload.members?.length) {
+        if (!selectedRecipientIds.length && message.payload.members?.length) {
           const nextRecipient = message.payload.members.find((member) => member.userId !== user?.id);
-          setPrimaryRecipientId(nextRecipient?.userId || "");
+          setSelectedRecipientIds(nextRecipient ? [nextRecipient.userId] : []);
         }
         return;
       }
@@ -521,7 +543,11 @@ export default function Page() {
             transferredBytes: 0,
             phase: "connecting"
           });
-          await beginSendingTransfer(message.payload.id, message.payload.recipientId);
+          if (totalBytes <= INSTANT_TRANSFER_BYTES) {
+            await beginDirectTransfer(message.payload.id);
+          } else {
+            await beginSendingTransfer(message.payload.id, message.payload.recipientId);
+          }
         }
 
         if (message.payload.status === "accepted" && message.payload.recipientId === user?.id) {
@@ -559,6 +585,48 @@ export default function Page() {
 
       if (message.type === "webrtc:signal") {
         await handleIncomingSignal(message.payload);
+        return;
+      }
+
+      if (message.type === "file:direct-start") {
+        incomingTransfersRef.current.set(message.payload.transferId, {
+          chunks: [],
+          receivedBytes: 0,
+          metadata: {
+            id: message.payload.transferId,
+            filename: message.payload.filename,
+            mimeType: message.payload.mimeType,
+            sizeBytes: message.payload.sizeBytes
+          },
+          directRelay: true
+        });
+        updateTransferRuntime(message.payload.transferId, {
+          totalBytes: Number(message.payload.sizeBytes || 0),
+          transferredBytes: 0,
+          phase: "transferring"
+        });
+        return;
+      }
+
+      if (message.type === "file:direct-chunk") {
+        const transferState = incomingTransfersRef.current.get(message.payload.transferId);
+        if (!transferState) {
+          return;
+        }
+
+        const chunk = base64ToUint8Array(message.payload.chunk);
+        transferState.chunks.push(chunk);
+        transferState.receivedBytes += chunk.byteLength;
+        updateTransferRuntime(message.payload.transferId, {
+          totalBytes: Number(transferState.metadata.sizeBytes || 0),
+          transferredBytes: transferState.receivedBytes,
+          phase: "transferring"
+        });
+        return;
+      }
+
+      if (message.type === "file:direct-complete") {
+        await finalizeIncomingTransfer(message.payload.transferId, false);
         return;
       }
 
@@ -771,12 +839,7 @@ export default function Page() {
   }
 
   function getTransferRecipients() {
-    const uniqueIds = new Set([
-      primaryRecipientId,
-      ...ccRecipientIds,
-      ...bccRecipientIds
-    ].filter(Boolean));
-
+    const uniqueIds = new Set(selectedRecipientIds.filter(Boolean));
     return [...uniqueIds];
   }
 
@@ -907,6 +970,62 @@ export default function Page() {
           sdp: offer
         }
       }
+    });
+  }
+
+  async function beginDirectTransfer(transferId) {
+    const pendingEntry = pendingOutgoingFilesRef.current.get(transferId);
+    if (!pendingEntry) {
+      return;
+    }
+
+    const file = pendingEntry.file;
+    const chunkSize = 48 * 1024;
+    let offset = 0;
+
+    updateTransferRuntime(transferId, {
+      totalBytes: file.size,
+      transferredBytes: 0,
+      phase: "transferring"
+    });
+
+    sendSocket({
+      type: "file:direct-start",
+      payload: { transferId }
+    });
+
+    while (offset < file.size) {
+      const chunk = await file.slice(offset, offset + chunkSize).arrayBuffer();
+      sendSocket({
+        type: "file:direct-chunk",
+        payload: {
+          transferId,
+          chunk: arrayBufferToBase64(chunk)
+        }
+      });
+      offset += chunk.byteLength;
+      updateTransferRuntime(transferId, {
+        totalBytes: file.size,
+        transferredBytes: offset,
+        phase: "transferring"
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+
+    sendSocket({
+      type: "file:direct-complete",
+      payload: { transferId }
+    });
+    sendSocket({
+      type: "file:complete",
+      payload: { transferId }
+    });
+
+    pendingOutgoingFilesRef.current.delete(transferId);
+    updateTransferRuntime(transferId, {
+      totalBytes: file.size,
+      transferredBytes: file.size,
+      phase: "complete"
     });
   }
 
@@ -1081,7 +1200,7 @@ export default function Page() {
     closeTransferPeer(transferId);
   }
 
-  async function finalizeIncomingTransfer(transferId) {
+  async function finalizeIncomingTransfer(transferId, notifyServer = true) {
     const transferState = incomingTransfersRef.current.get(transferId);
     if (!transferState) {
       return;
@@ -1098,10 +1217,12 @@ export default function Page() {
     URL.revokeObjectURL(downloadUrl);
 
     incomingTransfersRef.current.delete(transferId);
-    sendSocket({
-      type: "file:complete",
-      payload: { transferId }
-    });
+    if (notifyServer) {
+      sendSocket({
+        type: "file:complete",
+        payload: { transferId }
+      });
+    }
     updateTransferRuntime(transferId, {
       totalBytes: Number(transferState.metadata.sizeBytes || transferState.receivedBytes || 0),
       transferredBytes: Number(transferState.metadata.sizeBytes || transferState.receivedBytes || 0),
@@ -1164,12 +1285,22 @@ export default function Page() {
 
           <label>
             Password
-            <input
-              type="password"
-              value={authForm.password}
-              onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
-              placeholder="At least 8 characters"
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={authForm.password}
+                onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+                placeholder="At least 8 characters"
+              />
+              <button
+                className="password-toggle"
+                type="button"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                onClick={() => setShowPassword((current) => !current)}
+              >
+                {showPassword ? "🙈" : "👁"}
+              </button>
+            </div>
           </label>
 
           {authError ? <p className="inline-error">{authError}</p> : null}
@@ -1365,25 +1496,19 @@ export default function Page() {
                   </div>
 
                   <div className="recipient-grid">
-                    <RecipientPicker
-                      label="To"
+                    <RecipientDropdown
                       recipients={recipients}
-                      selectedIds={primaryRecipientId ? [primaryRecipientId] : []}
-                      onToggle={(userId) => setPrimaryRecipientId((current) => current === userId ? "" : userId)}
-                      singleSelect
+                      selectedIds={selectedRecipientIds}
+                      onToggle={(userId) => setSelectedRecipientIds((current) => toggleRecipient(current, userId))}
                     />
-                    <RecipientPicker
-                      label="Cc"
-                      recipients={recipients.filter((member) => member.userId !== primaryRecipientId)}
-                      selectedIds={ccRecipientIds}
-                      onToggle={(userId) => setCcRecipientIds((current) => toggleRecipient(current, userId))}
-                    />
-                    <RecipientPicker
-                      label="Bcc"
-                      recipients={recipients.filter((member) => member.userId !== primaryRecipientId)}
-                      selectedIds={bccRecipientIds}
-                      onToggle={(userId) => setBccRecipientIds((current) => toggleRecipient(current, userId))}
-                    />
+                    <label className="privacy-toggle">
+                      <input
+                        type="checkbox"
+                        checked={hideTransferRecipients}
+                        onChange={(event) => setHideTransferRecipients(event.target.checked)}
+                      />
+                      <span>Hide recipient names from everyone except the recipient</span>
+                    </label>
                   </div>
 
                   <div className="file-toolbar">
@@ -1406,12 +1531,15 @@ export default function Page() {
                       const percent = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : 0;
                       const runtimeStatus = runtime?.phase ? (STATUS_COPY[runtime.phase] || runtime.phase) : "";
                       const statusLabel = runtimeStatus || STATUS_COPY[transfer.status] || transfer.status;
+                      const recipientLabel = transfer.senderId === user.id && hideTransferRecipients
+                        ? "Private recipient"
+                        : (transfer.recipientName || "Room");
                       return (
                         <article className="transfer-card" key={transfer.id}>
                           <div className="transfer-copy">
                             <strong>{transfer.filename}</strong>
                             <p>
-                              {transfer.senderName} to {transfer.recipientName || "Room"} - {formatBytes(transfer.sizeBytes)}
+                              {transfer.senderName} to {recipientLabel} - {formatBytes(transfer.sizeBytes)}
                             </p>
                             {runtime ? (
                               <div className="transfer-progress-copy">
@@ -1538,32 +1666,31 @@ function ThemePicker({ theme, setTheme, compact = false }) {
   );
 }
 
-function RecipientPicker({ label, recipients, selectedIds, onToggle, singleSelect = false }) {
+function RecipientDropdown({ recipients, selectedIds, onToggle }) {
   return (
-    <div className="recipient-picker">
-      <div className="recipient-picker-header">
-        <strong>{label}</strong>
-        <span>{selectedIds.length ? `${selectedIds.length} selected` : "None"}</span>
-      </div>
-      <div className="recipient-chip-list">
+    <details className="recipient-dropdown">
+      <summary className="recipient-dropdown-trigger">
+        <span>Choose recipients</span>
+        <span>{selectedIds.length ? `${selectedIds.length} selected` : "None selected"}</span>
+      </summary>
+      <div className="recipient-dropdown-panel">
         {recipients.map((member) => {
           const selected = selectedIds.includes(member.userId);
           return (
-            <button
-              key={`${label}-${member.userId}`}
-              className={`recipient-chip ${selected ? "active" : ""}`}
-              type="button"
-              onClick={() => onToggle(member.userId)}
-            >
+            <label className={`recipient-option ${selected ? "active" : ""}`} key={member.userId}>
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={() => onToggle(member.userId)}
+              />
               <span className="member-dot" style={{ background: member.color }} />
               <span>{member.displayName}</span>
-              {singleSelect ? <small>{selected ? "Primary" : "Set"}</small> : null}
-            </button>
+            </label>
           );
         })}
         {!recipients.length ? <p className="muted-text">No eligible recipients</p> : null}
       </div>
-    </div>
+    </details>
   );
 }
 

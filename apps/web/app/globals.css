@@ -721,43 +721,84 @@ main {
   gap: 0.85rem;
 }
 
-.recipient-picker {
-  display: grid;
-  gap: 0.55rem;
+.recipient-dropdown {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--bg-strong);
+  overflow: hidden;
 }
 
-.recipient-picker-header {
+.recipient-dropdown-trigger {
+  list-style: none;
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
-.recipient-chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-}
-
-.recipient-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.55rem 0.8rem;
-  border-radius: 999px;
-  background: var(--bg-strong);
-  border: 1px solid var(--border);
+  padding: 0.85rem 1rem;
+  cursor: pointer;
   color: var(--text);
 }
 
-.recipient-chip.active {
+.recipient-dropdown-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.recipient-dropdown-panel {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0 1rem 1rem;
+}
+
+.recipient-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.recipient-option.active {
   background: var(--primary-soft);
   border-color: rgba(31, 122, 236, 0.3);
 }
 
-.recipient-chip small {
+.recipient-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.privacy-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.privacy-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 3.5rem;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-strong);
 }
 
 .message-actions {
