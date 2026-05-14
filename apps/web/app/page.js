@@ -1648,8 +1648,10 @@ export default function Page() {
                   <div className="member-list">
                     {members.map((member) => (
                       <div className="member-row" key={member.userId}>
-                        <span className="member-dot" style={{ background: member.color }} />
-                        <span>{member.displayName}</span>
+                        <div className="member-identity">
+                          <span className="member-dot" style={{ background: member.color }} />
+                          <span className="member-name">{member.displayName}</span>
+                        </div>
                         <span className={`status-pill ${member.online ? "online" : "offline"}`}>
                           {member.online ? "online" : "offline"}
                         </span>
@@ -1657,31 +1659,32 @@ export default function Page() {
                     ))}
                   </div>
                 </div>
+
+                {!isCompactLayout ? (
+                  <div className="panel pointer-panel pointer-panel-expanded">
+                    <div className="panel-header">
+                      <h3>Pointer stage</h3>
+                      <div className="pointer-panel-actions">
+                        <span>Desktop only</span>
+                        <button className="secondary-button" type="button" onClick={() => setIsPointerStageExpanded(true)}>
+                          Expand stage
+                        </button>
+                      </div>
+                    </div>
+                    <PointerSurface pointers={pointers} onMouseMove={handlePointerMove} />
+                  </div>
+                ) : (
+                  <div className="panel compact-note">
+                    <div className="panel-header">
+                      <h3>Mobile view</h3>
+                    </div>
+                    <p className="muted-text">
+                      Pointer sharing is hidden on smaller screens so chat and file transfer stay easy to use on phones.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
-            {!isCompactLayout ? (
-              <div className="panel pointer-panel pointer-panel-expanded">
-                <div className="panel-header">
-                  <h3>Pointer stage</h3>
-                  <div className="pointer-panel-actions">
-                    <span>Desktop only</span>
-                    <button className="secondary-button" type="button" onClick={() => setIsPointerStageExpanded(true)}>
-                      Expand stage
-                    </button>
-                  </div>
-                </div>
-                <PointerSurface pointers={pointers} onMouseMove={handlePointerMove} />
-              </div>
-            ) : (
-              <div className="panel compact-note">
-                <div className="panel-header">
-                  <h3>Mobile view</h3>
-                </div>
-                <p className="muted-text">
-                  Pointer sharing is hidden on smaller screens so chat and file transfer stay easy to use on phones.
-                </p>
-              </div>
-            )}
             </>
           ) : (
             <div className="empty-room-state">

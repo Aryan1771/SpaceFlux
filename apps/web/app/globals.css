@@ -575,8 +575,9 @@ main {
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
   gap: 1rem;
+  align-items: start;
 }
 
 .main-column,
@@ -584,6 +585,10 @@ main {
   display: grid;
   gap: 1rem;
   min-width: 0;
+}
+
+.side-column {
+  align-content: start;
 }
 
 .panel-header {
@@ -652,6 +657,20 @@ main {
 .transfer-list {
   display: grid;
   gap: 0.75rem;
+}
+
+.members-panel,
+.pointer-panel {
+  padding: 1rem 1.05rem 1.05rem;
+}
+
+.members-panel {
+  align-self: start;
+  gap: 0.35rem;
+}
+
+.members-panel .panel-header {
+  margin-bottom: 0.1rem;
 }
 
 .message-list {
@@ -913,21 +932,49 @@ main {
   color: #ff9d9d;
 }
 
+.member-list {
+  gap: 0;
+}
+
 .member-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.7rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
   align-items: center;
+  padding: 0.82rem 0;
+  border-top: 1px solid rgba(127, 140, 163, 0.12);
+}
+
+.member-row:first-child {
+  border-top: none;
+  padding-top: 0.2rem;
+}
+
+.member-row:last-child {
+  padding-bottom: 0.2rem;
+}
+
+.member-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.member-name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .member-dot {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
   border-radius: 999px;
 }
 
 .pointer-surface {
-  min-height: 320px;
+  min-height: 430px;
   border-radius: 24px;
   border: 1px dashed rgba(31, 122, 236, 0.26);
   background:
@@ -975,9 +1022,15 @@ main {
 
 .pointer-panel-actions {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.55rem;
   align-items: center;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pointer-panel-actions > span {
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .pointer-stage-overlay {
