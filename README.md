@@ -1,6 +1,6 @@
 # SpaceFlux
 
-SpaceFlux is a responsive room-based collaboration app built for free-tier hosting. Users can create accounts, join multiple rooms by code, chat, share files directly over WebRTC, and see live mouse pointers on larger screens.
+SpaceFlux is a responsive room-based collaboration app with separate frontend and backend deployments. Users can create accounts, join multiple rooms by code, chat, share files directly over WebRTC, and see live mouse pointers on larger screens.
 
 ## Stack
 
@@ -42,7 +42,7 @@ Create a Turso database and auth token, then run the schema in `apps/server/src/
 
 ### 2. Configure backend
 
-Copy `apps/server/.env.example` to `.env` and fill in:
+Copy `apps/server/.env.example` to `apps/server/.env` and fill in:
 
 - `DATABASE_URL`
 - `DATABASE_AUTH_TOKEN`
@@ -52,7 +52,7 @@ Copy `apps/server/.env.example` to `.env` and fill in:
 
 ### 3. Configure frontend
 
-Copy `apps/web/.env.local.example` to `.env.local` and fill in:
+Copy `apps/web/.env.local.example` to `apps/web/.env.local` and fill in:
 
 - `NEXT_PUBLIC_API_BASE_URL`
 - `NEXT_PUBLIC_WS_URL`
@@ -95,11 +95,20 @@ This runs:
 - File binaries are not stored in Turso
 - Large file transfers require both peers to be online
 - Pointer sharing is intentionally hidden on phone layouts
-- Render free services can cold start after idle
+- Hosting plans may suspend idle services; verify current provider limits before deployment
 
-## Security notes
+## Configuration and security
 
 - Passwords are hashed with Argon2
 - Sessions are stored server-side and sent via HttpOnly cookies
-- Turso encrypts data at rest at the provider level
 - No secrets should be committed; use the provided example env files
+
+## Documentation
+
+- [Backend setup](apps/server/README.md)
+- [Frontend setup](apps/web/README.md)
+- [Architecture](docs/architecture.md)
+
+## License
+
+See [LICENSE](LICENSE) for the GNU GPL v3 terms.
